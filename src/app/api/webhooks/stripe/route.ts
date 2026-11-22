@@ -2,6 +2,21 @@ import Stripe from "stripe";
 import { NextResponse } from "next/server";
 import { createClient as createSupabaseAdmin } from "@supabase/supabase-js";
 import { isPlanId } from "@/lib/plans";
+function getAdmin() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !key) {
+    throw new Error("Configuration Supabase admin manquante.");
+  }
+
+  return createSupabaseAdmin(url, key, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
+}
 
 export async function POST(req: Request) {
   const stripeKey = process.env.STRIPE_SECRET_KEY;
