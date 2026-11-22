@@ -16,7 +16,7 @@ const defaults: FluxoSettings = {
   language: "fr",
   theme: "dark",
   workspaceName: "",
-  plan: "pro",
+  plan: "standard",
 };
 
 type PersistedSettings = Omit<FluxoSettings, "plan"> & { plan?: PlanId };
