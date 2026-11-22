@@ -186,6 +186,24 @@ export default function FluxoApp() {
   const [copiedCustomerId, setCopiedCustomerId] = useState<string | null>(null);
   const [quoteAiNotice, setQuoteAiNotice] = useState<string | null>(null);
   const scrollToPlans = useRef(false);
+  const [hasActiveSubscription, setHasActiveSubscription] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/stripe/subscription", { cache: "no-store" })
+      .then(async (response) => response.ok ? response.json() : null)
+      .then((result) => {
+        if (cancelled || !result) return;
+        setHasActiveSubscription(Boolean(result.active));
+        if (result.plan === "standard" || result.plan === "pro" || result.plan === "business" || result.plan === "sovereign") {
+          updateSettings((current) => ({ ...current, plan: result.plan }));
+        }
+      })
+      .catch(() => {
+        // L'application reste utilisable si le service d'abonnement est temporairement indisponible.
+      });
+    return () => { cancelled = true; };
+  }, [updateSettings]);
   const [quoteDraft, setQuoteDraft] = useState<{
     email: string;
     subject: string;
@@ -1029,12 +1047,11 @@ export default function FluxoApp() {
               language={settings.language}
               theme={settings.theme}
               plan={settings.plan}
+              hasActiveSubscription={hasActiveSubscription}
               workspaceName={settings.workspaceName}
               onLanguageChange={(language) => updateSettings((current) => ({ ...current, language }))}
               onThemeChange={(theme: Theme) => updateSettings((current) => ({ ...current, theme }))}
-              onPlanChange={(plan) => {
-                updateSettings((current) => ({ ...current, plan }));
-              }}
+              onCheckout={() => { window.location.assign("/api/stripe/checkout"); }}
               onWorkspaceNameChange={(workspaceName) => updateSettings((current) => ({ ...current, workspaceName }))}
             />
           )}
