@@ -9,7 +9,6 @@ const PRICE_IDS: Record<PlanId, string> = {
   business: "price_1UeImbD5P1RiKWY3Z0GOJvh0",
   pro_max: "price_1UeIoMD5P1RiKWY39KF6CC8K",
 };
-
 export async function GET(request: Request) {
   const supabase = await createClient();
   const { data: { user }, error } = await supabase.auth.getUser();

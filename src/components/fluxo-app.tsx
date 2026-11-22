@@ -9,6 +9,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
+import Image from "next/image";
 import {
   getExpenseAnomalies,
   type Customer,
@@ -815,12 +816,7 @@ export default function FluxoApp() {
       <aside className="sidebar">
         <button className="brand" onClick={() => showSection("cockpit")} aria-label={copy.shell.brandLabel}>
           <span className="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 36 36">
-              <path d="M7 13.5c4.8 0 6.2-4.5 11-4.5 5.2 0 6.6 5 11 5" />
-              <path d="M7 22.5c4.8 0 6.2-4.5 11-4.5 5.2 0 6.6 5 11 5" />
-              <circle cx="7" cy="13.5" r="1.55" />
-              <circle cx="29" cy="23" r="1.55" />
-            </svg>
+            <Image src="/flux-logo.png" width={36} height={36} alt="" priority />
           </span>
           <span className="brand-name">Flux</span>
         </button>
@@ -844,13 +840,6 @@ export default function FluxoApp() {
 
         <div className="sidebar-bottom">
           <div className="sidebar-divider" />
-          <div className="privacy-note">
-            <span className="privacy-dot" />
-            <div>
-              <strong>{settings.workspaceName || copy.shell.savedHere}</strong>
-              <span>{copy.shell.savedDescription}</span>
-            </div>
-          </div>
           <div className="sidebar-version">FLUX · {copy.shell.private}</div>
         </div>
       </aside>

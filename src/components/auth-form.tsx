@@ -3,6 +3,7 @@
 
 import { useState, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -75,7 +76,9 @@ export default function AuthForm({ mode }: AuthFormProps) {
     <main style={styles.page}>
       <section style={styles.card}>
         <Link href="/" style={styles.brand}>
-          <span style={styles.logo}>F</span>
+          <span style={styles.logo}>
+            <Image src="/flux-logo.png" width={38} height={38} alt="" priority />
+          </span>
           <span>Flux</span>
         </Link>
 
@@ -170,28 +173,29 @@ export default function AuthForm({ mode }: AuthFormProps) {
 const styles: Record<string, React.CSSProperties> = {
   page: {
     minHeight: "100vh",
-    background: "#0b0e0c",
+    background: "radial-gradient(circle at 50% 10%, #202124 0, #111214 42%, #0b0c0e 100%)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     padding: "24px",
-    color: "#f4f6f4",
+    color: "#f1f1ef",
     fontFamily: "Arial, sans-serif",
   },
   card: {
     width: "100%",
     maxWidth: "440px",
     padding: "40px",
-    background: "#141a16",
-    border: "1px solid #29352c",
-    borderRadius: "18px",
+    background: "#17181b",
+    border: "1px solid #303136",
+    borderRadius: "16px",
+    boxShadow: "0 24px 80px rgba(0, 0, 0, 0.35)",
     boxSizing: "border-box",
   },
   brand: {
     display: "flex",
     alignItems: "center",
     gap: "10px",
-    color: "#f4f6f4",
+    color: "#f3f4fa",
     textDecoration: "none",
     fontSize: "23px",
     fontWeight: 700,
@@ -200,12 +204,13 @@ const styles: Record<string, React.CSSProperties> = {
   logo: {
     width: "38px",
     height: "38px",
-    borderRadius: "11px",
-    background: "#253a2a",
-    color: "#a5d58d",
+    borderRadius: "12px",
+    background: "#242529",
+    color: "#eeeeea",
     display: "grid",
     placeItems: "center",
-    border: "1px solid #54704d",
+    border: "1px solid #3b3c41",
+    overflow: "hidden",
   },
   heading: {
     marginBottom: "28px",
@@ -216,7 +221,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
   },
   subtitle: {
-    color: "#9ca99f",
+    color: "#afb4c4",
     fontSize: "14px",
     lineHeight: 1.6,
     margin: 0,
@@ -228,7 +233,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   label: {
     fontSize: "13px",
-    color: "#d7e0d8",
+    color: "#d9dcE8",
     fontWeight: 600,
     marginTop: "8px",
   },
@@ -236,8 +241,8 @@ const styles: Record<string, React.CSSProperties> = {
     width: "100%",
     padding: "14px",
     borderRadius: "9px",
-    border: "1px solid #354439",
-    background: "#0d120e",
+    border: "1px solid #393a3f",
+    background: "#0f1012",
     color: "#ffffff",
     fontSize: "14px",
     boxSizing: "border-box",
@@ -249,16 +254,16 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: "2px",
   },
   link: {
-    color: "#a5d58d",
+    color: "#deded9",
     textDecoration: "none",
     fontWeight: 600,
   },
   button: {
     border: "none",
-    borderRadius: "9px",
+    borderRadius: "10px",
     padding: "15px",
-    background: "#9bc77e",
-    color: "#101710",
+    background: "#deded8",
+    color: "#202125",
     fontWeight: 700,
     fontSize: "14px",
     cursor: "pointer",
@@ -270,20 +275,20 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1.5,
   },
   success: {
-    color: "#a5d58d",
+    color: "#b4beff",
     fontSize: "13px",
     lineHeight: 1.5,
   },
   footer: {
     textAlign: "center",
     fontSize: "13px",
-    color: "#aab5ac",
+    color: "#afb4c4",
     marginTop: "26px",
   },
   legal: {
     textAlign: "center",
     fontSize: "11px",
-    color: "#68766b",
+    color: "#858b9c",
     marginTop: "24px",
     lineHeight: 1.5,
   },
