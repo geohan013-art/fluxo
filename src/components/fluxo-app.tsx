@@ -191,19 +191,29 @@ export default function FluxoApp() {
   useEffect(() => {
     let cancelled = false;
     fetch("/api/stripe/subscription", { cache: "no-store" })
-      .then(async (response) => response.ok ? response.json() : null)
+      .then(async (response) => {
+        if (!response.ok) {
+          if (!cancelled) {
+            setHasActiveSubscription(false);
+            updateSettings((current) => ({ ...current, plan: "standard" }));
+          }
+          return null;
+        }
+        return response.json();
+      })
       .then((result) => {
         if (cancelled || !result) return;
         setHasActiveSubscription(Boolean(result.active));
-        if (result.plan === "standard" || result.plan === "pro" || result.plan === "business" || result.plan === "sovereign") {
-          updateSettings((current) => ({ ...current, plan: result.plan }));
-        }
+        updateSettings((current) => ({ ...current, plan: "standard" }));
       })
       .catch(() => {
-        // L'application reste utilisable si le service d'abonnement est temporairement indisponible.
+        if (!cancelled) {
+          setHasActiveSubscription(false);
+          updateSettings((current) => ({ ...current, plan: "standard" }));
+        }
       });
     return () => { cancelled = true; };
-  }, [updateSettings]);
+  }, []);
   const [quoteDraft, setQuoteDraft] = useState<{
     email: string;
     subject: string;
