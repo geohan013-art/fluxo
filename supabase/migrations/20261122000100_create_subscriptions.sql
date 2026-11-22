@@ -1,10 +1,12 @@
-alter table public.subscriptions
-  drop constraint if exists subscriptions_plan_check;
+create table if not exists public.subscriptions (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  stripe_customer_id text,
+  stripe_subscription_id text unique,
+  plan text not null default 'standard' check (plan in ('standard', 'pro', 'business', 'pro_max')),
+  status text not null default 'inactive',
+  updated_at timestamptz not null default now()
+);
 
-update public.subscriptions
-set plan = 'pro_max'
-where plan = 'sovereign';
+alter table public.subscriptions enable row level security;
 
-alter table public.subscriptions
-  add constraint subscriptions_plan_check
-  check (plan in ('standard', 'pro', 'business', 'pro_max'));
+-- No client policies: only trusted server code using the service-role key can read or write subscriptions.
