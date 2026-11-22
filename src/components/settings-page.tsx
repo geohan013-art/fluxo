@@ -27,20 +27,22 @@ export default function SettingsPage({
   language,
   theme,
   plan,
+  hasActiveSubscription,
   workspaceName,
   onLanguageChange,
   onThemeChange,
-  onPlanChange,
+  onCheckout,
   onWorkspaceNameChange,
 }: {
   copy: Copy;
   language: Language;
   theme: Theme;
   plan: PlanId;
+  hasActiveSubscription: boolean;
   workspaceName: string;
   onLanguageChange: (language: Language) => void;
   onThemeChange: (theme: Theme) => void;
-  onPlanChange: (plan: PlanId) => void;
+  onCheckout: () => void;
   onWorkspaceNameChange: (name: string) => void;
 }) {
   const setWorkspaceName = (event: ChangeEvent<HTMLInputElement>) => {
@@ -142,7 +144,7 @@ export default function SettingsPage({
           </div>
           <div className="plan-list">
             {PLAN_IDS.map((planId) => {
-              const isCurrent = plan === planId;
+              const isCurrent = hasActiveSubscription && plan === planId;
               const quotas = planFeatures[planId].quotas;
               const formatLimit = (limit: number | null) =>
                 limit === null
@@ -154,7 +156,6 @@ export default function SettingsPage({
                 <article
                   className={`plan-card ${isCurrent ? "selected" : ""} ${planId === "pro" ? "recommended" : ""} ${planId === "sovereign" ? "sovereign" : ""}`}
                   key={planId}
-                  onClick={() => onPlanChange(planId)}
                 >
                   {isCurrent && <span className="plan-current">{copy.settings.currentPlan}</span>}
                   {planId === "pro" && <span className="plan-badge plan-badge-recommended">{copy.settings.recommended}</span>}
@@ -201,14 +202,17 @@ export default function SettingsPage({
                     type="button"
                     className="plan-action"
                     aria-pressed={isCurrent}
+                    disabled={planId !== "standard" || isCurrent}
                     onClick={(event) => {
                       event.stopPropagation();
-                      onPlanChange(planId);
+                      if (planId === "standard" && !isCurrent) onCheckout();
                     }}
                   >
                     {isCurrent
                       ? copy.settings.currentPlan
-                      : copy.settings.choosePlan}
+                      : planId === "standard"
+                        ? (language === "fr" ? "S'abonner — 14,99 €/mois" : "Subscribe — €14.99/month")
+                        : (language === "fr" ? "Bientôt disponible" : "Coming soon")}
                   </button>
                 </article>
               );
