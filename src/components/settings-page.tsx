@@ -15,11 +15,11 @@ const planIcons: Record<PlanId, string> = {
   pro_max: "✦",
 };
 
-const planDescriptions: Record<PlanId, "standardDescription" | "proDescription" | "businessDescription" | "pro_maxDescription"> = {
+const planDescriptions: Record<PlanId, "standardDescription" | "proDescription" | "businessDescription" | "proMaxDescription"> = {
   standard: "standardDescription",
   pro: "proDescription",
   business: "businessDescription",
-  pro_max: "pro_maxDescription",
+  pro_max: "proMaxDescription",
 };
 
 export default function SettingsPage({
