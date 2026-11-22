@@ -3,11 +3,11 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { isPlanId, type PlanId } from "@/lib/plans";
 
-const PRICE_ENV: Record<PlanId, string> = {
-  standard: "STRIPE_STANDARD_PRICE_ID",
-  pro: "STRIPE_PRO_PRICE_ID",
-  business: "STRIPE_BUSINESS_PRICE_ID",
-  pro_max: "STRIPE_PRO_MAX_PRICE_ID",
+const PRICE_IDS: Record<PlanId, string> = {
+  standard: "price_1UeIfiD5P1RiKWY3U7S7AlG3",
+  pro: "price_1UeIkZD5P1RiKWY3iID2T6sC",
+  business: "price_1UeImbD5P1RiKWY3Z0GOJvh0",
+  pro_max: "price_1UeIoMD5P1RiKWY39KF6CC8K",
 };
 
 export async function GET(request: Request) {
@@ -21,9 +21,8 @@ export async function GET(request: Request) {
   if (!isPlanId(requestedPlan)) return NextResponse.json({ error: "Formule invalide." }, { status: 400 });
   const plan: PlanId = requestedPlan;
   const stripeKey = process.env.STRIPE_SECRET_KEY;
-  const priceEnv = PRICE_ENV[plan];
-  const priceId = process.env[priceEnv];
-  if (!stripeKey || !priceId) return NextResponse.json({ error: `Paiement non configuré : vérifiez STRIPE_SECRET_KEY et ${priceEnv} dans Vercel.` }, { status: 503 });
+  const priceId = PRICE_IDS[plan];
+  if (!stripeKey) return NextResponse.json({ error: "Paiement non configuré : ajoutez STRIPE_SECRET_KEY dans Vercel." }, { status: 503 });
   try {
     const stripe = new Stripe(stripeKey);
     const session = await stripe.checkout.sessions.create({
