@@ -1,45 +1,41 @@
 import Stripe from "stripe";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { isPlanId, type PlanId } from "@/lib/plans";
 
-export const runtime = "nodejs";
+const PRICE_ENV: Record<PlanId, string> = {
+  standard: "STRIPE_STANDARD_PRICE_ID",
+  pro: "STRIPE_PRO_PRICE_ID",
+  business: "STRIPE_BUSINESS_PRICE_ID",
+  pro_max: "STRIPE_PRO_MAX_PRICE_ID",
+};
 
 export async function GET(request: Request) {
   const supabase = await createClient();
   const { data: { user }, error } = await supabase.auth.getUser();
-
   if (error || !user) {
-    const origin = new URL(request.url).origin;
-    return NextResponse.redirect(new URL("/connexion?next=/settings", origin));
+    return NextResponse.redirect(new URL("/connexion?next=/settings", new URL(request.url).origin));
   }
-
+  const url = new URL(request.url);
+  const requestedPlan = url.searchParams.get("plan") ?? "standard";
+  if (!isPlanId(requestedPlan)) return NextResponse.json({ error: "Formule invalide." }, { status: 400 });
+  const plan: PlanId = requestedPlan;
   const stripeKey = process.env.STRIPE_SECRET_KEY;
-  const priceId = process.env.STRIPE_STANDARD_PRICE_ID;
-  if (!stripeKey || !priceId) {
-    return NextResponse.json(
-      { error: "Le paiement Standard n'est pas encore configuré. Ajoutez STRIPE_SECRET_KEY et STRIPE_STANDARD_PRICE_ID dans Vercel." },
-      { status: 503 },
-    );
-  }
-
+  const priceEnv = PRICE_ENV[plan];
+  const priceId = process.env[priceEnv];
+  if (!stripeKey || !priceId) return NextResponse.json({ error: `Paiement non configuré : vérifiez STRIPE_SECRET_KEY et ${priceEnv} dans Vercel.` }, { status: 503 });
   try {
     const stripe = new Stripe(stripeKey);
-    const origin = new URL(request.url).origin;
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       line_items: [{ price: priceId, quantity: 1 }],
       client_reference_id: user.id,
-      metadata: { supabase_user_id: user.id, plan: "standard" },
-      subscription_data: {
-        metadata: { supabase_user_id: user.id, plan: "standard" },
-      },
-      success_url: `${origin}/?payment=success`,
-      cancel_url: `${origin}/?payment=cancelled`,
+      metadata: { supabase_user_id: user.id, plan },
+      subscription_data: { metadata: { supabase_user_id: user.id, plan } },
+      success_url: `${url.origin}/?payment=success`,
+      cancel_url: `${url.origin}/settings?payment=cancelled#plan-options`,
     });
-
-    if (!session.url) {
-      return NextResponse.json({ error: "Stripe n'a pas fourni d'URL de paiement." }, { status: 502 });
-    }
+    if (!session.url) return NextResponse.json({ error: "Stripe n’a pas fourni d’URL de paiement." }, { status: 502 });
     return NextResponse.redirect(session.url);
   } catch (error) {
     console.error("Erreur création Checkout Stripe:", error);
