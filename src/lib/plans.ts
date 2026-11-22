@@ -1,4 +1,4 @@
-export const PLAN_IDS = ["standard", "pro", "business", "sovereign"] as const;
+export const PLAN_IDS = ["standard", "pro", "business", "pro_max"] as const;
 export type PlanId = (typeof PLAN_IDS)[number];
 
 export const MODULE_IDS = ["recover", "sales", "control", "projects", "recurring"] as const;
@@ -36,10 +36,10 @@ export type PlanCopyKey =
   | "businessFeatureIncludesPro"
   | "businessFeatureRecover"
   | "businessFeatureControl"
-  | "sovereignFeatureIncludesBusiness"
-  | "sovereignFeatureCockpit"
-  | "sovereignFeatureConnections"
-  | "sovereignFeatureSupport";
+  | "proMaxFeatureIncludesBusiness"
+  | "proMaxFeatureCockpit"
+  | "proMaxFeatureConnections"
+  | "proMaxFeatureSupport";
 
 type PlanDefinition = {
   price: number;
@@ -117,7 +117,7 @@ export const planFeatures: Record<PlanId, PlanDefinition> = {
       "businessFeatureControl",
     ],
   },
-  sovereign: {
+  pro_max: {
     price: 49.99,
     modules: ["sales", "projects", "recurring", "recover", "control"],
     quotas: {
@@ -138,10 +138,10 @@ export const planFeatures: Record<PlanId, PlanDefinition> = {
       dedicatedSupport: true,
     },
     displayFeatures: [
-      "sovereignFeatureIncludesBusiness",
-      "sovereignFeatureCockpit",
-      "sovereignFeatureConnections",
-      "sovereignFeatureSupport",
+      "proMaxFeatureIncludesBusiness",
+      "proMaxFeatureCockpit",
+      "proMaxFeatureConnections",
+      "proMaxFeatureSupport",
     ],
   },
 };
