@@ -204,7 +204,7 @@ export default function FluxoApp() {
       .then((result) => {
         if (cancelled || !result) return;
         setHasActiveSubscription(Boolean(result.active));
-        updateSettings((current) => ({ ...current, plan: "standard" }));
+        updateSettings((current) => ({ ...current, plan: result.plan ?? "standard" }));
       })
       .catch(() => {
         if (!cancelled) {
