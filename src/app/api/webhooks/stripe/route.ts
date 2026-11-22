@@ -51,7 +51,10 @@ export async function POST(req: Request) {
     }
     if (event.type === "invoice.payment_failed") {
       const invoice = event.data.object as Stripe.Invoice;
-      const subscriptionId = typeof invoice.subscription === "string" ? invoice.subscription : invoice.subscription?.id;
+      const invoiceSubscription = invoice.parent?.subscription_details?.subscription;
+      const subscriptionId = typeof invoiceSubscription === "string"
+        ? invoiceSubscription
+        : invoiceSubscription?.id;
       if (subscriptionId) {
         const subscription = await stripe.subscriptions.retrieve(subscriptionId);
         const { error } = await admin.from("subscriptions").update({ status: subscription.status, updated_at: new Date().toISOString() }).eq("stripe_subscription_id", subscriptionId);
