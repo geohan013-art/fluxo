@@ -221,6 +221,22 @@ export default function FluxoApp() {
     body: string;
   } | null>(null);
 
+  useEffect(() => {
+    if (!dialog) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    let focusFrame = 0;
+    if (window.matchMedia("(pointer: fine)").matches) {
+      focusFrame = window.requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>(".dialog-card [data-dialog-autofocus]")?.focus();
+      });
+    }
+    return () => {
+      if (focusFrame) window.cancelAnimationFrame(focusFrame);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [dialog]);
+
   const copy = getCopy(settings.language);
   const anomalies = useMemo(
     () => hasPlanFeature(settings.plan, "duplicatePriceDetection")
@@ -682,6 +698,7 @@ export default function FluxoApp() {
   function showSection(next: Section) {
     const moduleId = sectionModules[next];
     if (moduleId && !requireModuleAccess(moduleId)) return;
+    if (section !== next) window.scrollTo(0, 0);
     setSection(next);
     setCopyError(null);
   }
@@ -846,6 +863,17 @@ export default function FluxoApp() {
 
       <section className="main-panel">
         <header className="topbar">
+          <div className="mobile-brand-group">
+            <button className="mobile-brand" onClick={() => showSection("cockpit")} aria-label={copy.shell.brandLabel}>
+              <span className="brand-mark" aria-hidden="true">
+                <Image src="/flux-logo.png" width={28} height={28} alt="" priority />
+              </span>
+              <span className="brand-name">Flux</span>
+            </button>
+            <span className="mobile-workspace" title={settings.workspaceName || copy.shell.private}>
+              {settings.workspaceName || copy.shell.private}
+            </span>
+          </div>
           <div className="breadcrumb">
             <span>Flux</span>
             <span className="breadcrumb-separator">/</span>
@@ -893,7 +921,7 @@ export default function FluxoApp() {
               else if (section === "projects") openProjectDialog();
               else if (section === "recurring") openRecurringDialog();
               else openQuoteDialog();
-            }}>
+            }} aria-label={canAddCurrentItem ? newItemLabel : copy.access.viewPlans}>
               <Icon name={canAddCurrentItem ? "plus" : "lock"} size={17} />
               <span>{canAddCurrentItem ? newItemLabel : copy.access.viewPlans}</span>
             </button>}
@@ -1058,7 +1086,7 @@ export default function FluxoApp() {
       </section>
 
       {dialog && (
-        <div className="dialog-backdrop" onMouseDown={(event) => {
+        <div className="dialog-backdrop" onClick={(event) => {
           if (event.target === event.currentTarget) {
             setDialog(null);
             setQuoteDraft(null);
@@ -1199,7 +1227,7 @@ export default function FluxoApp() {
                   </select>
                 </label>}
                 <label className="field field-wide">{copy.forms.customerName}
-                  <input name="client" maxLength={120} placeholder={copy.forms.namePlaceholder} defaultValue={dialog.item?.client ?? data.customers.find((customer) => customer.id === dialog.customerId)?.name ?? ""} autoFocus />
+                  <input name="client" maxLength={120} placeholder={copy.forms.namePlaceholder} defaultValue={dialog.item?.client ?? data.customers.find((customer) => customer.id === dialog.customerId)?.name ?? ""} data-dialog-autofocus />
                 </label>
                 <label className="field field-wide">{copy.forms.customerEmail}
                   <input name="email" type="email" maxLength={254} placeholder={copy.forms.customerEmailPlaceholder} defaultValue={dialog.item?.email ?? ""} />
@@ -1222,7 +1250,7 @@ export default function FluxoApp() {
             {dialog.kind === "expense" && (
               <form className="form-grid" onSubmit={saveExpense}>
                 <label className="field">{copy.forms.supplier}
-                  <input name="supplier" required maxLength={120} placeholder={copy.forms.supplierPlaceholder} defaultValue={dialog.item?.supplier ?? ""} autoFocus />
+                  <input name="supplier" required maxLength={120} placeholder={copy.forms.supplierPlaceholder} defaultValue={dialog.item?.supplier ?? ""} data-dialog-autofocus />
                 </label>
                 <label className="field">{copy.forms.label}
                   <input name="label" required maxLength={160} placeholder={copy.forms.labelPlaceholder} defaultValue={dialog.item?.label ?? ""} />
@@ -1240,7 +1268,7 @@ export default function FluxoApp() {
             {dialog.kind === "customer" && (
               <form className="form-grid" onSubmit={saveCustomer}>
                 <label className="field field-wide">{copy.forms.customerName}
-                  <input name="name" required maxLength={120} placeholder={copy.forms.namePlaceholder} defaultValue={dialog.item?.name ?? ""} autoFocus />
+                  <input name="name" required maxLength={120} placeholder={copy.forms.namePlaceholder} defaultValue={dialog.item?.name ?? ""} data-dialog-autofocus />
                 </label>
                 <label className="field">{copy.forms.contactName}
                   <input name="contactName" maxLength={120} placeholder={copy.forms.contactName} defaultValue={dialog.item?.contactName ?? ""} />
@@ -1291,7 +1319,7 @@ export default function FluxoApp() {
             {dialog.kind === "project" && (
               <form className="form-grid" onSubmit={saveProject}>
                 <label className="field field-wide">{copy.forms.projectName}
-                  <input name="name" required maxLength={120} defaultValue={dialog.item?.name ?? ""} autoFocus />
+                  <input name="name" required maxLength={120} defaultValue={dialog.item?.name ?? ""} data-dialog-autofocus />
                 </label>
                 {data.customers.length > 0 && <label className="field field-wide">{copy.forms.selectClient}
                   <select name="customerId" defaultValue={dialog.item?.customerId ?? ""}>
@@ -1319,7 +1347,7 @@ export default function FluxoApp() {
             {dialog.kind === "recurring" && (
               <form className="form-grid" onSubmit={saveRecurringExpense}>
                 <label className="field">{copy.forms.supplier}
-                  <input name="supplier" required maxLength={120} defaultValue={dialog.item?.supplier ?? ""} autoFocus />
+                  <input name="supplier" required maxLength={120} defaultValue={dialog.item?.supplier ?? ""} data-dialog-autofocus />
                 </label>
                 <label className="field">{copy.forms.label}
                   <input name="label" required maxLength={160} defaultValue={dialog.item?.label ?? ""} />

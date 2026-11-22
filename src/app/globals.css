@@ -4035,3 +4035,267 @@ td > strong {
   background: var(--surface-raised);
   color: var(--text-secondary);
 }
+
+.mobile-brand-group {
+  display: none;
+}
+
+button,
+a,
+input,
+textarea,
+select {
+  touch-action: manipulation;
+}
+
+@media (max-width: 760px) {
+  html,
+  body {
+    width: 100%;
+    overflow-x: hidden;
+  }
+
+  .app-shell {
+    display: flex;
+    min-width: 0;
+    min-height: 100vh;
+    min-height: 100dvh;
+    flex-direction: column;
+    overflow-x: hidden;
+  }
+
+  .main-panel {
+    width: 100%;
+    min-width: 0;
+    min-height: 100vh;
+    min-height: 100dvh;
+    margin: 0;
+    padding-bottom: calc(70px + env(safe-area-inset-bottom));
+  }
+
+  .mobile-brand-group {
+    display: flex;
+    min-width: 0;
+    flex: 0 1 auto;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .mobile-brand {
+    display: inline-flex;
+    min-width: 0;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 7px;
+    margin: 0;
+    cursor: pointer;
+  }
+
+  .mobile-brand .brand-mark {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+  }
+
+  .mobile-brand .brand-name {
+    font-size: 17px;
+  }
+
+  .mobile-workspace {
+    overflow: hidden;
+    max-width: 92px;
+    color: var(--text-muted);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .topbar {
+    position: sticky;
+    z-index: 4;
+    top: 0;
+    height: auto;
+    min-height: 58px;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .breadcrumb {
+    display: none;
+  }
+
+  .topbar-actions {
+    min-width: 0;
+    flex: 0 0 auto;
+    gap: 7px;
+  }
+
+  .toolbar-controls {
+    gap: 5px;
+  }
+
+  .language-switch button {
+    min-width: 40px;
+    height: 40px;
+  }
+
+  .theme-toggle {
+    width: 44px;
+    height: 44px;
+  }
+
+  .top-add {
+    min-height: 44px;
+  }
+
+  .sidebar {
+    position: fixed;
+    z-index: 5;
+    inset: auto 0 0;
+    width: 100%;
+    max-height: calc(78px + env(safe-area-inset-bottom));
+    overflow: hidden;
+    padding: 5px 7px calc(5px + env(safe-area-inset-bottom));
+    border: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .sidebar > .brand,
+  .workspace-label,
+  .sidebar-bottom {
+    display: none;
+  }
+
+  .primary-nav {
+    display: flex;
+    height: 58px;
+    flex: none;
+    flex-direction: row;
+    gap: 2px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 2px;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+  }
+
+  .primary-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-group,
+  .nav-group + .nav-group,
+  .nav-locked-group,
+  .nav-settings-group {
+    display: contents;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .nav-group-label {
+    display: none;
+  }
+
+  .nav-link {
+    min-width: 60px;
+    min-height: 56px;
+    flex: 0 0 auto;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    padding: 5px 8px;
+    border-radius: 8px;
+    scroll-snap-align: start;
+    transition: background-color 100ms ease, color 100ms ease;
+  }
+
+  .nav-link.active::before {
+    display: none;
+  }
+
+  .nav-link span:nth-child(2) {
+    font-size: 11px;
+    line-height: 1.15;
+    white-space: nowrap;
+  }
+
+  .nav-link > svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .nav-count {
+    position: absolute;
+    top: 0;
+    right: 0;
+    min-width: 15px;
+    height: 15px;
+    font-size: 9px;
+  }
+
+  .page-content {
+    min-width: 0;
+    padding: 22px 14px 28px;
+  }
+
+  .metrics-grid,
+  .dashboard-columns,
+  .surface,
+  .metric-card,
+  .table-scroll,
+  .recent-table-scroll {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .table-scroll,
+  .recent-table-scroll {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .dialog-backdrop {
+    place-items: end center;
+    height: 100vh;
+    height: 100dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: max(8px, env(safe-area-inset-top)) 0 0;
+  }
+
+  .dialog-card {
+    width: 100%;
+    max-height: calc(100dvh - env(safe-area-inset-top) - 8px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 22px 18px max(22px, env(safe-area-inset-bottom));
+    border-radius: 15px 15px 0 0;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+@media (max-width: 390px) {
+  .mobile-workspace {
+    display: none;
+  }
+
+  .top-add {
+    width: 44px;
+    min-width: 44px;
+    padding: 0;
+  }
+
+  .top-add span {
+    display: none;
+  }
+}
