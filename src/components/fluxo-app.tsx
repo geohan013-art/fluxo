@@ -1061,7 +1061,7 @@ export default function FluxoApp() {
               workspaceName={settings.workspaceName}
               onLanguageChange={(language) => updateSettings((current) => ({ ...current, language }))}
               onThemeChange={(theme: Theme) => updateSettings((current) => ({ ...current, theme }))}
-              onCheckout={() => { window.location.assign("/api/stripe/checkout"); }}
+              onCheckout={(selectedPlan) => { window.location.assign(`/api/stripe/checkout?plan=${selectedPlan}`); }}
               onWorkspaceNameChange={(workspaceName) => updateSettings((current) => ({ ...current, workspaceName }))}
             />
           )}
