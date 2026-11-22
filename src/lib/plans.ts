@@ -29,6 +29,7 @@ export type PlanQuotas = Record<QuotaId, number | null>;
 export type PlanCopyKey =
   | "standardFeatureCockpit"
   | "standardFeatureSales"
+  | "standardFeatureRecover"
   | "standardFeatureClients"
   | "proFeatureBase"
   | "proFeatureProjects"
@@ -63,7 +64,7 @@ const noFeatures: Record<PlanFeature, boolean> = {
 export const planFeatures: Record<PlanId, PlanDefinition> = {
   standard: {
     price: 14.99,
-    modules: ["sales"],
+    modules: ["sales", "recover"],
     quotas: {
       quotesPerMonth: 50,
       customers: 100,
@@ -75,12 +76,13 @@ export const planFeatures: Record<PlanId, PlanDefinition> = {
     displayFeatures: [
       "standardFeatureCockpit",
       "standardFeatureSales",
+      "standardFeatureRecover",
       "standardFeatureClients",
     ],
   },
   pro: {
     price: 24.99,
-    modules: ["sales", "projects", "recurring"],
+    modules: ["sales", "projects", "recurring", "recover"],
     quotas: {
       quotesPerMonth: 500,
       customers: 1000,
