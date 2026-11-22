@@ -12,14 +12,14 @@ const planIcons: Record<PlanId, string> = {
   standard: "◌",
   pro: "⌘",
   business: "▦",
-  sovereign: "✦",
+  pro_max: "✦",
 };
 
-const planDescriptions: Record<PlanId, "standardDescription" | "proDescription" | "businessDescription" | "sovereignDescription"> = {
+const planDescriptions: Record<PlanId, "standardDescription" | "proDescription" | "businessDescription" | "pro_maxDescription"> = {
   standard: "standardDescription",
   pro: "proDescription",
   business: "businessDescription",
-  sovereign: "sovereignDescription",
+  pro_max: "pro_maxDescription",
 };
 
 export default function SettingsPage({
@@ -42,7 +42,7 @@ export default function SettingsPage({
   workspaceName: string;
   onLanguageChange: (language: Language) => void;
   onThemeChange: (theme: Theme) => void;
-  onCheckout: () => void;
+  onCheckout: (plan: PlanId) => void;
   onWorkspaceNameChange: (name: string) => void;
 }) {
   const setWorkspaceName = (event: ChangeEvent<HTMLInputElement>) => {
@@ -154,12 +154,12 @@ export default function SettingsPage({
                     : new Intl.NumberFormat(language === "fr" ? "fr-FR" : "en-GB").format(limit);
               return (
                 <article
-                  className={`plan-card ${isCurrent ? "selected" : ""} ${planId === "pro" ? "recommended" : ""} ${planId === "sovereign" ? "sovereign" : ""}`}
+                  className={`plan-card ${isCurrent ? "selected" : ""} ${planId === "pro" ? "recommended" : ""} ${planId === "pro_max" ? "pro_max" : ""}`}
                   key={planId}
                 >
                   {isCurrent && <span className="plan-current">{copy.settings.currentPlan}</span>}
                   {planId === "pro" && <span className="plan-badge plan-badge-recommended">{copy.settings.recommended}</span>}
-                  {planId === "sovereign" && <span className="plan-badge plan-badge-sovereign">{copy.settings.topPlan}</span>}
+                  {planId === "pro_max" && <span className="plan-badge plan-badge-pro_max">{copy.settings.topPlan}</span>}
                   <div className="plan-card-top">
                     <span className="plan-symbol" aria-hidden="true">{planIcons[planId]}</span>
                     <span className="plan-name">{copy.access.planNames[planId]}</span>
@@ -202,17 +202,15 @@ export default function SettingsPage({
                     type="button"
                     className="plan-action"
                     aria-pressed={isCurrent}
-                    disabled={planId !== "standard" || isCurrent}
+                    disabled={isCurrent}
                     onClick={(event) => {
                       event.stopPropagation();
-                      if (planId === "standard" && !isCurrent) onCheckout();
+                      if (!isCurrent) onCheckout(planId);
                     }}
                   >
                     {isCurrent
                       ? copy.settings.currentPlan
-                      : planId === "standard"
-                        ? (language === "fr" ? "S'abonner — 14,99 €/mois" : "Subscribe — €14.99/month")
-                        : (language === "fr" ? "Bientôt disponible" : "Coming soon")}
+                      : (language === "fr" ? "S’abonner" : "Subscribe")}
                   </button>
                 </article>
               );
