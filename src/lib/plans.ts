@@ -1,89 +1,132 @@
-export const PLAN_IDS = ["standard", "pro", "business"] as const;
-
+export const PLAN_IDS = ["standard", "pro", "business", "sovereign"] as const;
 export type PlanId = (typeof PLAN_IDS)[number];
-export type ModuleId = "recover" | "sales" | "control" | "growth";
-export type PlanFeature =
-  | "aiEmailReminders"
-  | "healthScore"
-  | "duplicatePriceDetection"
-  | "realTimeActionFeed"
-  | "multiUser"
-  | "bankConnection"
-  | "accountingConnection"
-  | "dedicatedSupport";
+
+export const MODULE_IDS = ["recover", "sales", "control", "projects", "recurring"] as const;
+export type ModuleId = (typeof MODULE_IDS)[number];
+
+export const PLAN_FEATURES = [
+  "aiEmailReminders",
+  "healthScore",
+  "duplicatePriceDetection",
+  "realTimeActionFeed",
+  "multiUser",
+  "bankConnection",
+  "accountingConnection",
+  "dedicatedSupport",
+] as const;
+export type PlanFeature = (typeof PLAN_FEATURES)[number];
+
+export const QUOTA_IDS = [
+  "quotesPerMonth",
+  "customers",
+  "invoicesPerMonth",
+  "projects",
+  "users",
+] as const;
+export type QuotaId = (typeof QUOTA_IDS)[number];
+export type PlanQuotas = Record<QuotaId, number | null>;
+
 export type PlanCopyKey =
   | "standardFeatureCockpit"
   | "standardFeatureSales"
-  | "standardFeatureInvoices"
+  | "standardFeatureClients"
   | "proFeatureBase"
-  | "proFeatureControl"
-  | "proFeatureRecover"
-  | "proFeatureInvoices"
+  | "proFeatureProjects"
+  | "proFeatureRecurring"
   | "businessFeatureIncludesPro"
-  | "businessFeatureGrowth"
-  | "businessFeatureAdvanced"
-  | "businessFeatureUsers"
-  | "businessFeatureConnections"
-  | "businessFeatureSupport";
+  | "businessFeatureRecover"
+  | "businessFeatureControl"
+  | "sovereignFeatureIncludesBusiness"
+  | "sovereignFeatureCockpit"
+  | "sovereignFeatureConnections"
+  | "sovereignFeatureSupport";
 
 type PlanDefinition = {
   price: number;
   modules: readonly ModuleId[];
-  monthlyInvoiceLimit: number | null;
-  maxUsers: number;
+  quotas: PlanQuotas;
   features: Record<PlanFeature, boolean>;
   displayFeatures: readonly PlanCopyKey[];
 };
 
+const noFeatures: Record<PlanFeature, boolean> = {
+  aiEmailReminders: false,
+  healthScore: false,
+  duplicatePriceDetection: false,
+  realTimeActionFeed: false,
+  multiUser: false,
+  bankConnection: false,
+  accountingConnection: false,
+  dedicatedSupport: false,
+};
+
 export const planFeatures: Record<PlanId, PlanDefinition> = {
   standard: {
-    price: 19.99,
+    price: 14.99,
     modules: ["sales"],
-    monthlyInvoiceLimit: 50,
-    maxUsers: 1,
-    features: {
-      aiEmailReminders: false,
-      healthScore: false,
-      duplicatePriceDetection: false,
-      realTimeActionFeed: false,
-      multiUser: false,
-      bankConnection: false,
-      accountingConnection: false,
-      dedicatedSupport: false,
+    quotas: {
+      quotesPerMonth: 50,
+      customers: 100,
+      invoicesPerMonth: 50,
+      projects: 0,
+      users: 1,
     },
+    features: noFeatures,
     displayFeatures: [
       "standardFeatureCockpit",
       "standardFeatureSales",
-      "standardFeatureInvoices",
+      "standardFeatureClients",
     ],
   },
   pro: {
-    price: 29.99,
-    modules: ["sales", "control", "recover"],
-    monthlyInvoiceLimit: null,
-    maxUsers: 1,
-    features: {
-      aiEmailReminders: true,
-      healthScore: true,
-      duplicatePriceDetection: false,
-      realTimeActionFeed: false,
-      multiUser: false,
-      bankConnection: false,
-      accountingConnection: false,
-      dedicatedSupport: false,
+    price: 24.99,
+    modules: ["sales", "projects", "recurring"],
+    quotas: {
+      quotesPerMonth: 500,
+      customers: 1000,
+      invoicesPerMonth: 500,
+      projects: 100,
+      users: 2,
     },
+    features: { ...noFeatures, multiUser: true },
     displayFeatures: [
       "proFeatureBase",
-      "proFeatureControl",
-      "proFeatureRecover",
-      "proFeatureInvoices",
+      "proFeatureProjects",
+      "proFeatureRecurring",
     ],
   },
   business: {
-    price: 59.99,
-    modules: ["recover", "sales", "control", "growth"],
-    monthlyInvoiceLimit: null,
-    maxUsers: 10,
+    price: 34.99,
+    modules: ["sales", "projects", "recurring", "recover", "control"],
+    quotas: {
+      quotesPerMonth: 2500,
+      customers: 5000,
+      invoicesPerMonth: 2500,
+      projects: 1000,
+      users: 4,
+    },
+    features: {
+      ...noFeatures,
+      aiEmailReminders: true,
+      duplicatePriceDetection: true,
+      multiUser: true,
+    },
+    displayFeatures: [
+      "businessFeatureIncludesPro",
+      "businessFeatureRecover",
+      "businessFeatureControl",
+    ],
+  },
+  sovereign: {
+    price: 49.99,
+    modules: ["sales", "projects", "recurring", "recover", "control"],
+    quotas: {
+      quotesPerMonth: null,
+      customers: null,
+      invoicesPerMonth: null,
+      projects: null,
+      users: 20,
+    },
     features: {
       aiEmailReminders: true,
       healthScore: true,
@@ -95,24 +138,16 @@ export const planFeatures: Record<PlanId, PlanDefinition> = {
       dedicatedSupport: true,
     },
     displayFeatures: [
-      "businessFeatureIncludesPro",
-      "businessFeatureGrowth",
-      "businessFeatureAdvanced",
-      "businessFeatureUsers",
-      "businessFeatureConnections",
-      "businessFeatureSupport",
+      "sovereignFeatureIncludesBusiness",
+      "sovereignFeatureCockpit",
+      "sovereignFeatureConnections",
+      "sovereignFeatureSupport",
     ],
   },
 };
 
-export const planNames: Record<PlanId, string> = {
-  standard: "Standard",
-  pro: "Pro",
-  business: "Business",
-};
-
 export function isPlanId(value: unknown): value is PlanId {
-  return PLAN_IDS.some((plan) => plan === value);
+  return typeof value === "string" && PLAN_IDS.includes(value as PlanId);
 }
 
 export function hasModuleAccess(plan: PlanId, module: ModuleId): boolean {
@@ -124,27 +159,40 @@ export function hasPlanFeature(plan: PlanId, feature: PlanFeature): boolean {
 }
 
 export function getMinimumPlanForModule(module: ModuleId): PlanId {
-  const minimumPlan = PLAN_IDS.find((plan) =>
-    planFeatures[plan].modules.includes(module),
-  );
-  if (!minimumPlan) {
-    throw new Error(`No plan grants access to the ${module} module.`);
-  }
-  return minimumPlan;
+  const plan = PLAN_IDS.find((planId) => hasModuleAccess(planId, module));
+  if (!plan) throw new Error(`No plan includes the ${module} module.`);
+  return plan;
 }
 
 export function getMinimumPlanForFeature(feature: PlanFeature): PlanId {
-  const minimumPlan = PLAN_IDS.find((plan) => planFeatures[plan].features[feature]);
-  if (!minimumPlan) {
-    throw new Error(`No plan grants the ${feature} feature.`);
-  }
-  return minimumPlan;
+  const plan = PLAN_IDS.find((planId) => hasPlanFeature(planId, feature));
+  if (!plan) throw new Error(`No plan includes the ${feature} feature.`);
+  return plan;
+}
+
+export function getPlanForQuotaUpgrade(plan: PlanId, quota: QuotaId): PlanId {
+  const currentLimit = planFeatures[plan].quotas[quota];
+  const currentIndex = PLAN_IDS.indexOf(plan);
+  const nextPlan = PLAN_IDS.slice(currentIndex + 1).find((planId) => {
+    const nextLimit = planFeatures[planId].quotas[quota];
+    return nextLimit === null || (currentLimit !== null && nextLimit > currentLimit);
+  });
+  if (!nextPlan) throw new Error(`No higher plan increases the ${quota} quota.`);
+  return nextPlan;
+}
+
+export function canCreateWithinQuota(
+  plan: PlanId,
+  quota: QuotaId,
+  currentCount: number,
+): boolean {
+  const limit = planFeatures[plan].quotas[quota];
+  return limit === null || currentCount < limit;
 }
 
 export function canCreateInvoice(
   plan: PlanId,
-  invoicesCreatedThisMonth: number,
+  invoicesThisMonth: number,
 ): boolean {
-  const limit = planFeatures[plan].monthlyInvoiceLimit;
-  return limit === null || invoicesCreatedThisMonth < limit;
+  return canCreateWithinQuota(plan, "invoicesPerMonth", invoicesThisMonth);
 }

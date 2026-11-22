@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Fluxo — Votre activité, en un regard",
+  title: "Flux — Votre activité, en un regard",
   description:
-    "Pilotez vos devis, vos dépenses et la réactivation de vos clients.",
+    "Pilotez vos ventes, vos factures, vos projets, vos dépenses et vos relances clients.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

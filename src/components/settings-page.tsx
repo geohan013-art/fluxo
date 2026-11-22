@@ -5,7 +5,6 @@ import type { Copy, Language, Theme } from "@/lib/locale";
 import {
   PLAN_IDS,
   planFeatures,
-  planNames,
   type PlanId,
 } from "@/lib/plans";
 
@@ -13,12 +12,14 @@ const planIcons: Record<PlanId, string> = {
   standard: "◌",
   pro: "⌘",
   business: "▦",
+  sovereign: "✦",
 };
 
-const planDescriptions: Record<PlanId, "standardDescription" | "proDescription" | "businessDescription"> = {
+const planDescriptions: Record<PlanId, "standardDescription" | "proDescription" | "businessDescription" | "sovereignDescription"> = {
   standard: "standardDescription",
   pro: "proDescription",
   business: "businessDescription",
+  sovereign: "sovereignDescription",
 };
 
 export default function SettingsPage({
@@ -133,7 +134,7 @@ export default function SettingsPage({
           </section>
         </div>
 
-        <aside className="settings-aside">
+        <aside className="settings-aside" id="plan-options">
           <div className="plan-aside-heading">
             <span className="eyebrow">{copy.settings.plansEyebrow}</span>
             <h2>{copy.settings.plansTitle}</h2>
@@ -142,16 +143,25 @@ export default function SettingsPage({
           <div className="plan-list">
             {PLAN_IDS.map((planId) => {
               const isCurrent = plan === planId;
+              const quotas = planFeatures[planId].quotas;
+              const formatLimit = (limit: number | null) =>
+                limit === null
+                  ? copy.settings.unlimited
+                  : limit === 0
+                    ? copy.settings.notIncluded
+                    : new Intl.NumberFormat(language === "fr" ? "fr-FR" : "en-GB").format(limit);
               return (
                 <article
-                  className={`plan-card ${isCurrent ? "selected" : ""}`}
+                  className={`plan-card ${isCurrent ? "selected" : ""} ${planId === "pro" ? "recommended" : ""} ${planId === "sovereign" ? "sovereign" : ""}`}
                   key={planId}
                   onClick={() => onPlanChange(planId)}
                 >
                   {isCurrent && <span className="plan-current">{copy.settings.currentPlan}</span>}
+                  {planId === "pro" && <span className="plan-badge plan-badge-recommended">{copy.settings.recommended}</span>}
+                  {planId === "sovereign" && <span className="plan-badge plan-badge-sovereign">{copy.settings.topPlan}</span>}
                   <div className="plan-card-top">
                     <span className="plan-symbol" aria-hidden="true">{planIcons[planId]}</span>
-                    <span className="plan-name">{planNames[planId]}</span>
+                    <span className="plan-name">{copy.access.planNames[planId]}</span>
                   </div>
                   <div className="plan-price">
                     <strong>{new Intl.NumberFormat(language === "fr" ? "fr-FR" : "en-IE", {
@@ -169,6 +179,21 @@ export default function SettingsPage({
                         <span>{copy.settings[feature]}</span>
                       </li>
                     ))}
+                    <li>
+                      <span className="plan-feature-check" aria-hidden="true">✓</span>
+                      <span>{copy.settings.planQuotaSales(
+                        formatLimit(quotas.quotesPerMonth),
+                        formatLimit(quotas.customers),
+                        formatLimit(quotas.invoicesPerMonth),
+                      )}</span>
+                    </li>
+                    <li>
+                      <span className="plan-feature-check" aria-hidden="true">✓</span>
+                      <span>{copy.settings.planQuotaWork(
+                        formatLimit(quotas.projects),
+                        formatLimit(quotas.users),
+                      )}</span>
+                    </li>
                   </ul>
                   <div className="plan-rule" />
                   <span className="plan-billing-label">{copy.settings.monthlyPrice}</span>

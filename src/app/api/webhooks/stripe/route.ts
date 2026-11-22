@@ -1,0 +1,1 @@
+https://TON-DOMAINE-VERCEL.vercel.app/api/webhooks/stripe
