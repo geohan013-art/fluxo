@@ -367,7 +367,7 @@ const fr = {
       standard: "Standard",
       pro: "Pro",
       business: "Business",
-      proMax: "Pro Max",
+      pro_max: "Pro Max",
     },
     quotaNames: {
       quotesPerMonth: "devis par mois",
@@ -760,7 +760,7 @@ const en: Widen<typeof fr> = {
       standard: "Standard",
       pro: "Pro",
       business: "Business",
-      proMax: "Pro Max",
+      pro_max: "Pro Max",
     },
     quotaNames: {
       quotesPerMonth: "quotes per month",
