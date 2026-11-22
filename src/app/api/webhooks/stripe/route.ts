@@ -37,7 +37,7 @@ export async function POST(req: Request) {
 
     if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
       const session = event.data.object as Stripe.Checkout.Session;
-      const userId = session.client_reference_id;
+      const userId = session.client_reference_id ?? session.metadata?.supabase_user_id;
       const subscriptionId = typeof session.subscription === "string"
         ? session.subscription
         : session.subscription?.id;
@@ -58,10 +58,20 @@ export async function POST(req: Request) {
 
     if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
       const subscription = event.data.object as Stripe.Subscription;
-      const { error } = await admin
-        .from("subscriptions")
-        .update({ status: subscription.status, updated_at: new Date().toISOString() })
-        .eq("stripe_subscription_id", subscription.id);
+      const userId = subscription.metadata?.supabase_user_id;
+      const values = {
+        status: subscription.status,
+        updated_at: new Date().toISOString(),
+      };
+      const { error } = userId
+        ? await admin.from("subscriptions").upsert({
+            user_id: userId,
+            stripe_subscription_id: subscription.id,
+            stripe_customer_id: typeof subscription.customer === "string" ? subscription.customer : subscription.customer.id,
+            plan: "standard",
+            ...values,
+          }, { onConflict: "user_id" })
+        : await admin.from("subscriptions").update(values).eq("stripe_subscription_id", subscription.id);
       if (error) throw error;
     }
 
