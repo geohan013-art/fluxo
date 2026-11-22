@@ -8,7 +8,7 @@ export async function GET() {
   const { data: { user }, error } = await supabase.auth.getUser();
 
   if (error || !user) {
-    return NextResponse.redirect(new URL("/login?next=/settings", process.env.NEXT_PUBLIC_APP_URL ?? "https://flux000.vercel.app"));
+    return NextResponse.redirect(new URL("/connexion?next=/settings", process.env.NEXT_PUBLIC_APP_URL ?? "https://flux000.vercel.app"));
   }
 
   const paymentLink = process.env.STRIPE_STANDARD_PAYMENT_LINK;
