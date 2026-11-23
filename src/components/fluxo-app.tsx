@@ -15,6 +15,7 @@ import {
   type Customer,
   type Expense,
   type Invoice,
+  type InvoiceStatus,
   type Project,
   type ProjectStatus,
   type Quote,
@@ -38,6 +39,7 @@ import {
   getPlanForQuotaUpgrade,
   hasModuleAccess,
   hasPlanFeature,
+  isPlanId,
   planFeatures,
   type ModuleId,
   type PlanFeature,
@@ -62,14 +64,35 @@ type UpgradeTarget =
   | { kind: "quota"; quota: QuotaId; limit: number };
 type DialogState =
   | { kind: "quote"; item?: Quote; customerId?: string }
+  | { kind: "quote-generating"; item: Quote }
   | { kind: "expense"; item?: Expense }
   | { kind: "customer"; item?: Customer }
   | { kind: "invoice"; item?: Invoice }
+  | { kind: "invoice-generating"; item: Invoice }
+  | { kind: "invoice-draft"; item: Invoice }
+  | { kind: "customer-message"; item: Customer }
   | { kind: "project"; item?: Project }
   | { kind: "recurring"; item?: RecurringExpense }
   | { kind: "quote-draft"; item: Quote }
   | { kind: "upgrade"; requiredPlan: PlanId; target: UpgradeTarget }
   | null;
+type EmailDraft = { email: string; subject: string; body: string };
+type GmailStatus = { configured: boolean; connected: boolean; email: string | null };
+
+function getInvoiceReminderLabel(status: InvoiceStatus, copy: Copy) {
+  if (status === "never") return copy.invoices.reminderNever;
+  if (status === "relanced") return copy.invoices.reminderSent;
+  if (status === "relanced-with-response") return copy.invoices.reminderReplied;
+  return copy.invoices.reminderReady;
+}
+
+function getEmailSendError(result: unknown, fallback: string, notConfigured: string) {
+  if (!result || typeof result !== "object") return fallback;
+  if ("code" in result && result.code === "RESEND_NOT_CONFIGURED") return notConfigured;
+  if ("error" in result && typeof result.error === "string") return result.error;
+  return fallback;
+}
+
 type IconName =
   | "grid"
   | "document"
@@ -168,9 +191,24 @@ function getCustomerEmail(customer: Customer) {
 
 function getCustomerContactName(customer: Customer) {
   if (customer.contactName) return customer.contactName;
-  return customer.contact.includes("·")
-    ? customer.contact.split("·")[0].trim()
-    : customer.contact;
+  const contactParts = customer.contact.split("·").map((part) => part.trim());
+  return contactParts.find((part) => part && !part.includes("@")) ?? "";
+}
+
+function copyTextFallback(text: string) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  try {
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+    return document.execCommand("copy");
+  } finally {
+    textarea.remove();
+  }
 }
 
 export default function FluxoApp() {
@@ -186,40 +224,118 @@ export default function FluxoApp() {
   const [copyError, setCopyError] = useState<string | null>(null);
   const [copiedCustomerId, setCopiedCustomerId] = useState<string | null>(null);
   const [quoteAiNotice, setQuoteAiNotice] = useState<string | null>(null);
+  const [quoteDraftError, setQuoteDraftError] = useState<string | null>(null);
+  const [isGeneratingQuoteDraft, setIsGeneratingQuoteDraft] = useState(false);
+  const [isSendingQuoteDraft, setIsSendingQuoteDraft] = useState(false);
+  const [gmailStatus, setGmailStatus] = useState<GmailStatus>({
+    configured: false,
+    connected: false,
+    email: null,
+  });
+  const [gmailStatusError, setGmailStatusError] = useState<string | null>(null);
+  const [mailNotice, setMailNotice] = useState<string | null>(null);
+  const [isDisconnectingGmail, setIsDisconnectingGmail] = useState(false);
+  const [invoiceDraft, setInvoiceDraft] = useState<EmailDraft | null>(null);
+  const [invoiceDraftError, setInvoiceDraftError] = useState<string | null>(null);
+  const [customerMessageDraft, setCustomerMessageDraft] = useState<EmailDraft | null>(null);
+  const [customerMessageError, setCustomerMessageError] = useState<string | null>(null);
+  const [isGeneratingCustomerMessage, setIsGeneratingCustomerMessage] = useState(false);
+  const [isSendingCustomerMessage, setIsSendingCustomerMessage] = useState(false);
+  const [isGeneratingInvoiceDraft, setIsGeneratingInvoiceDraft] = useState(false);
+  const [isSendingInvoiceDraft, setIsSendingInvoiceDraft] = useState(false);
   const scrollToPlans = useRef(false);
   const [hasActiveSubscription, setHasActiveSubscription] = useState(false);
+  const [isCreatorAccount, setIsCreatorAccount] = useState(false);
+  const [isPlanSimulated, setIsPlanSimulated] = useState(false);
+  const [hasResolvedSubscription, setHasResolvedSubscription] = useState(false);
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
+  const [isGmailStatusLoading, setIsGmailStatusLoading] = useState(true);
+  const copy = getCopy(settings.language);
 
   useEffect(() => {
     let cancelled = false;
     fetch("/api/stripe/subscription", { cache: "no-store" })
       .then(async (response) => {
+        const result: unknown = await response.json();
         if (!response.ok) {
-          if (!cancelled) {
-            setHasActiveSubscription(false);
-            updateSettings((current) => ({ ...current, plan: "standard" }));
-          }
-          return null;
+          const message = result && typeof result === "object" && "error" in result &&
+            typeof result.error === "string"
+            ? result.error
+            : "Impossible de vérifier l’abonnement.";
+          throw new Error(message);
         }
-        return response.json();
+        return result;
       })
-      .then((result) => {
-        if (cancelled || !result) return;
-        setHasActiveSubscription(Boolean(result.active));
-        updateSettings((current) => ({ ...current, plan: result.plan ?? "standard" }));
+      .then((result: unknown) => {
+        if (cancelled) return;
+        if (!result || typeof result !== "object" || Array.isArray(result)) {
+          throw new Error("Réponse d’abonnement invalide.");
+        }
+        const subscription = result as Record<string, unknown>;
+        const active = subscription.active === true && isPlanId(subscription.plan);
+        const plan: PlanId = isPlanId(subscription.plan)
+          ? subscription.plan
+          : "standard";
+        const effectivePlan: PlanId = active ? plan : "standard";
+        const isPlanSimulated = active && subscription.isSimulated === true;
+        const isCreator = active && !isPlanSimulated &&
+          subscription.isCreator === true && effectivePlan === "pro_max";
+        setHasActiveSubscription(active);
+        setIsCreatorAccount(isCreator);
+        setIsPlanSimulated(isPlanSimulated);
+        setSubscriptionError(null);
+        updateSettings((current) => ({ ...current, plan: effectivePlan }));
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!cancelled) {
           setHasActiveSubscription(false);
+          setIsCreatorAccount(false);
+          setIsPlanSimulated(false);
+          setSubscriptionError(error instanceof Error
+            ? error.message
+            : "Impossible de vérifier l’abonnement.");
           updateSettings((current) => ({ ...current, plan: "standard" }));
         }
+      })
+      .finally(() => {
+        if (!cancelled) setHasResolvedSubscription(true);
       });
     return () => { cancelled = true; };
   }, []);
-  const [quoteDraft, setQuoteDraft] = useState<{
-    email: string;
-    subject: string;
-    body: string;
-  } | null>(null);
+  const [quoteDraft, setQuoteDraft] = useState<EmailDraft | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/email/gmail/status", { cache: "no-store" })
+      .then(async (response) => {
+        if (response.status === 401) {
+          if (!cancelled) setGmailStatusError(copy.settings.gmailAuthRequired);
+          return null;
+        }
+        if (!response.ok) {
+          const result = await response.json() as { error?: string };
+          throw new Error(result.error ?? copy.settings.gmailStatusError);
+        }
+        return response.json() as Promise<GmailStatus>;
+      })
+      .then((result) => {
+        if (!cancelled && result) {
+          setGmailStatus(result);
+          setGmailStatusError(null);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setGmailStatusError(
+            error instanceof Error ? error.message : copy.settings.gmailStatusError,
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsGmailStatusLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [copy.settings.gmailAuthRequired, copy.settings.gmailStatusError]);
 
   useEffect(() => {
     if (!dialog) return;
@@ -237,7 +353,18 @@ export default function FluxoApp() {
     };
   }, [dialog]);
 
-  const copy = getCopy(settings.language);
+  useEffect(() => {
+    const result = new URLSearchParams(window.location.search).get("gmail");
+    if (!result) return;
+    const timer = window.setTimeout(() => {
+      setSection("settings");
+      setMailNotice(result === "connected" ? copy.settings.gmailConnected : copy.settings.gmailConnectionFailed);
+    }, 0);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("gmail");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    return () => window.clearTimeout(timer);
+  }, [copy.settings.gmailConnected, copy.settings.gmailConnectionFailed]);
   const anomalies = useMemo(
     () => hasPlanFeature(settings.plan, "duplicatePriceDetection")
       ? getExpenseAnomalies(data.expenses, settings.language)
@@ -258,7 +385,7 @@ export default function FluxoApp() {
     scrollToPlans.current = false;
   }, [section]);
 
-  if (!isLoaded || !settingsLoaded) {
+  if (!isLoaded || !settingsLoaded || !hasResolvedSubscription) {
     return <main className="loading-screen" aria-label={copy.shell.loading}><span className="loading-mark">F</span></main>;
   }
 
@@ -306,9 +433,10 @@ export default function FluxoApp() {
     setDialog({ kind: "customer", item });
   }
 
-  function openInvoiceDialog() {
-    if (!requireModuleAccess("sales") || !canAddQuota("invoicesPerMonth", invoicesThisMonth)) return;
-    setDialog({ kind: "invoice" });
+  function openInvoiceDialog(item?: Invoice) {
+    if (!requireModuleAccess("sales")) return;
+    if (!item && !canAddQuota("invoicesPerMonth", invoicesThisMonth)) return;
+    setDialog({ kind: "invoice", item });
   }
 
   function openProjectDialog(item?: Project) {
@@ -320,6 +448,150 @@ export default function FluxoApp() {
   function openRecurringDialog(item?: RecurringExpense) {
     if (!requireModuleAccess("recurring")) return;
     setDialog({ kind: "recurring", item });
+  }
+
+  function getInvoiceEmail(invoice: Invoice) {
+    const customer = data.customers.find((item) =>
+      (invoice.customerId && item.id === invoice.customerId) ||
+      item.name.trim().toLocaleLowerCase() === invoice.company.trim().toLocaleLowerCase(),
+    );
+    const quote = data.quotes.find((item) => item.id === invoice.quoteId);
+    return invoice.email?.trim() || (customer ? getCustomerEmail(customer) : undefined) ||
+      quote?.email?.trim() || "";
+  }
+
+  async function generateInvoiceFollowUp(invoice: Invoice, recipient = getInvoiceEmail(invoice)) {
+    if (isGeneratingInvoiceDraft || isSendingInvoiceDraft) return;
+    if (!hasPlanFeature(settings.plan, "aiEmailReminders")) {
+      requestUpgrade({ kind: "feature", feature: "aiEmailReminders" });
+      return;
+    }
+    if (!requireModuleAccess("recover")) return;
+    setMailNotice(null);
+    setInvoiceDraftError(null);
+    setInvoiceDraft(null);
+    setDialog({ kind: "invoice-generating", item: invoice });
+    setIsGeneratingInvoiceDraft(true);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 35_000);
+    try {
+      const response = await fetch("/api/email/invoices/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          invoiceNumber: invoice.number,
+          company: invoice.company,
+          contact: invoice.contact,
+          amount: invoice.amount,
+          dueDate: invoice.dueDate,
+          daysLate: getInvoiceDaysLate(invoice),
+          language: settings.language,
+        }),
+      });
+      const result: unknown = await response.json();
+      if (!response.ok) {
+        const message = result && typeof result === "object" && "error" in result &&
+          typeof result.error === "string"
+          ? result.error
+          : copy.invoices.aiDraftError;
+        throw new Error(message);
+      }
+      if (
+        !result ||
+        typeof result !== "object" ||
+        !("subject" in result) ||
+        typeof result.subject !== "string" ||
+        !("body" in result) ||
+        typeof result.body !== "string"
+      ) {
+        throw new Error(copy.invoices.aiDraftError);
+      }
+      setInvoiceDraft({ email: recipient, subject: result.subject, body: result.body });
+      setDialog({ kind: "invoice-draft", item: invoice });
+    } catch (error) {
+      setDialog(null);
+      setMailNotice(
+        error instanceof Error && error.name === "AbortError"
+          ? copy.invoices.aiDraftTimeout
+          : error instanceof Error
+            ? error.message
+            : copy.invoices.aiDraftError,
+      );
+    } finally {
+      window.clearTimeout(timeoutId);
+      setIsGeneratingInvoiceDraft(false);
+    }
+  }
+
+  async function sendInvoiceFollowUp() {
+    if (dialog?.kind !== "invoice-draft" || !invoiceDraft || isSendingInvoiceDraft) return;
+    setInvoiceDraftError(null);
+    setIsSendingInvoiceDraft(true);
+    try {
+      const response = await fetch("/api/email/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: invoiceDraft.email,
+          subject: invoiceDraft.subject,
+          body: invoiceDraft.body,
+        }),
+      });
+      const result: unknown = await response.json();
+      if (!response.ok) {
+        throw new Error(getEmailSendError(result, copy.invoices.emailSendError, copy.invoices.emailNotConfigured));
+      }
+      updateInvoiceStatus(dialog.item.id, "relanced", invoiceDraft.email.trim());
+      setMailNotice(copy.invoices.emailSent(invoiceDraft.email));
+      setInvoiceDraft(null);
+      setDialog(null);
+    } catch (error) {
+      setInvoiceDraftError(error instanceof Error ? error.message : copy.invoices.emailSendError);
+    } finally {
+      setIsSendingInvoiceDraft(false);
+    }
+  }
+
+  async function disconnectGmail() {
+    setGmailStatusError(null);
+    setIsDisconnectingGmail(true);
+    try {
+      const response = await fetch("/api/email/gmail/connection", { method: "DELETE" });
+      const result: unknown = await response.json();
+      if (!response.ok) {
+        const message = result && typeof result === "object" && "error" in result &&
+          typeof result.error === "string"
+          ? result.error
+          : copy.settings.gmailDisconnectError;
+        throw new Error(message);
+      }
+      setGmailStatus((current) => ({ ...current, connected: false, email: null }));
+      setMailNotice(copy.settings.gmailDisconnected);
+    } catch (error) {
+      setGmailStatusError(error instanceof Error ? error.message : copy.settings.gmailDisconnectError);
+    } finally {
+      setIsDisconnectingGmail(false);
+    }
+  }
+
+  function closeDialog() {
+    if (
+      isGeneratingInvoiceDraft ||
+      isSendingInvoiceDraft ||
+      isGeneratingCustomerMessage ||
+      isSendingCustomerMessage ||
+      isGeneratingQuoteDraft ||
+      isSendingQuoteDraft
+    ) return;
+    setDialog(null);
+    setQuoteDraft(null);
+    setQuoteDraftError(null);
+    setInvoiceDraft(null);
+    setInvoiceDraftError(null);
+    setCustomerMessageDraft(null);
+    setCustomerMessageError(null);
+    setCopyError(null);
   }
 
   function saveQuote(event: FormEvent<HTMLFormElement>) {
@@ -411,7 +683,7 @@ export default function FluxoApp() {
   function saveInvoice(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (dialog?.kind !== "invoice" || !requireModuleAccess("sales")) return;
-    if (!canAddQuota("invoicesPerMonth", invoicesThisMonth)) return;
+    if (!dialog.item && !canAddQuota("invoicesPerMonth", invoicesThisMonth)) return;
     const form = new FormData(event.currentTarget);
     const dueDate = String(form.get("dueDate"));
     const dueTime = new Date(`${dueDate}T12:00:00`).getTime();
@@ -429,21 +701,25 @@ export default function FluxoApp() {
       return;
     }
     const invoice: Invoice = {
-      id: makeId(),
+      id: dialog.item?.id ?? makeId(),
       number: String(form.get("number")).trim(),
       company: customer?.name ?? company,
       contact: customer ? getCustomerContactName(customer) : String(form.get("contact")).trim(),
+      email: String(form.get("email") ?? "").trim() || (customer ? getCustomerEmail(customer) : undefined),
       customerId: customer?.id,
       amount: Number(form.get("amount")),
       dueDate,
       daysLate,
-      status: "never",
-      paymentStatus: "pending",
-      createdAt: new Date().toISOString(),
+      quoteId: dialog.item?.quoteId,
+      status: dialog.item?.status ?? "never",
+      paymentStatus: dialog.item?.paymentStatus ?? "pending",
+      createdAt: dialog.item?.createdAt ?? new Date().toISOString(),
     };
     updateData((current) => ({
       ...current,
-      invoices: [invoice, ...current.invoices],
+      invoices: dialog.item
+        ? current.invoices.map((item) => (item.id === invoice.id ? invoice : item))
+        : [invoice, ...current.invoices],
     }));
     setDialog(null);
   }
@@ -528,6 +804,7 @@ export default function FluxoApp() {
           number,
           company: customer?.name ?? quote.client,
           contact: customer?.contactName ?? customer?.contact ?? quote.email ?? "",
+          email: customer ? getCustomerEmail(customer) : quote.email,
           customerId: customer?.id ?? quote.customerId,
           quoteId: quote.id,
           amount: quote.amount,
@@ -575,12 +852,14 @@ export default function FluxoApp() {
     }));
   }
 
-  function updateInvoiceStatus(id: string, status: "never" | "relanced" | "ai-ready") {
+  function updateInvoiceStatus(id: string, status: InvoiceStatus, email?: string) {
     if (!requireModuleAccess("recover")) return;
     updateData((current) => ({
       ...current,
       invoices: current.invoices.map((invoice) =>
-        invoice.id === id ? { ...invoice, status } : invoice,
+        invoice.id === id
+          ? { ...invoice, status, ...(email === undefined ? {} : { email }) }
+          : invoice,
       ),
     }));
   }
@@ -595,64 +874,116 @@ export default function FluxoApp() {
     }));
   }
 
-  function sendAiQuoteFollowUp(quote: Quote) {
+  async function generateQuoteFollowUp(quote: Quote) {
+    if (isGeneratingQuoteDraft || isSendingQuoteDraft) return;
     if (!hasPlanFeature(settings.plan, "aiEmailReminders")) {
       requestUpgrade({ kind: "feature", feature: "aiEmailReminders" });
       return;
     }
     if (!requireModuleAccess("sales")) return;
-    const email = quote.email?.trim();
-    if (!email) {
-      setQuoteAiNotice(
-        settings.language === "fr"
-          ? "Ajoutez l’adresse e-mail du client pour envoyer la relance IA."
-          : "Add the customer's email address to send the AI follow-up.",
-      );
-      openQuoteDialog(quote);
-      return;
+    setMailNotice(null);
+    setQuoteAiNotice(null);
+    setQuoteDraftError(null);
+    setQuoteDraft(null);
+    setDialog({ kind: "quote-generating", item: quote });
+    setIsGeneratingQuoteDraft(true);
+    const customer = data.customers.find((item) =>
+      (quote.customerId && item.id === quote.customerId) ||
+      item.name.trim().toLocaleLowerCase() === quote.client.trim().toLocaleLowerCase(),
+    );
+    const recipient = quote.email?.trim() || (customer ? getCustomerEmail(customer)?.trim() : undefined) || "";
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 35_000);
+    try {
+      const response = await fetch("/api/email/quotes/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          client: quote.client,
+          contactName: customer ? getCustomerContactName(customer) : "",
+          amount: quote.amount,
+          probability: quote.probability,
+          status: quote.status,
+          createdAt: quote.createdAt,
+          language: settings.language,
+        }),
+      });
+      const result: unknown = await response.json();
+      if (!response.ok) {
+        const message = result && typeof result === "object" && "error" in result &&
+          typeof result.error === "string"
+          ? result.error
+          : copy.quotes.aiDraftError;
+        throw new Error(message);
+      }
+      if (
+        !result ||
+        typeof result !== "object" ||
+        !("subject" in result) ||
+        typeof result.subject !== "string" ||
+        !("body" in result) ||
+        typeof result.body !== "string"
+      ) {
+        throw new Error(copy.quotes.aiDraftError);
+      }
+      setQuoteDraft({
+        email: recipient,
+        subject: result.subject,
+        body: result.body,
+      });
+      setDialog({ kind: "quote-draft", item: quote });
+    } catch (error) {
+      const message = error instanceof Error && error.name === "AbortError"
+        ? copy.quotes.aiDraftTimeout
+        : error instanceof Error
+          ? error.message
+          : copy.quotes.aiDraftError;
+      setDialog(null);
+      setQuoteAiNotice(message);
+      setMailNotice(message);
+    } finally {
+      window.clearTimeout(timeoutId);
+      setIsGeneratingQuoteDraft(false);
     }
-    setQuoteDraft(buildQuoteDraft(quote));
-    setDialog({ kind: "quote-draft", item: quote });
   }
 
-  function buildQuoteDraft(quote: Quote) {
-    const sentDate = new Intl.DateTimeFormat(
-      settings.language === "fr" ? "fr-FR" : "en-GB",
-      { day: "numeric", month: "long", year: "numeric" },
-    ).format(new Date(quote.createdAt));
-    const amount = formatCurrency(quote.amount, settings.language);
-    return {
-      email: quote.email?.trim() ?? "",
-      subject: settings.language === "fr"
-        ? "Suivi de votre devis"
-        : "Follow-up on your quote",
-      body: settings.language === "fr"
-        ? `Bonjour ${quote.client},\n\nJe me permets de revenir vers vous concernant notre devis envoyé le ${sentDate}, d’un montant de ${amount}. Nous restons à votre disposition pour répondre à vos questions ou adapter notre proposition.\n\nSeriez-vous disponible pour échanger prochainement ?\n\nBien cordialement`
-        : `Hello ${quote.client},\n\nI’m following up on our quote sent on ${sentDate}, for ${amount}. We remain available to answer your questions or adapt our proposal.\n\nWould you be available to discuss it soon?\n\nKind regards`,
-    };
-  }
-
-  function sendQuoteDraft() {
-    if (dialog?.kind !== "quote-draft" || !quoteDraft) return;
-    if (!quoteDraft.email.trim()) return;
-    updateData((current) => ({
-      ...current,
-      quotes: current.quotes.map((quote) =>
-        quote.id === dialog.item.id
-          ? { ...quote, email: quoteDraft.email.trim(), status: "followed-up" as QuoteStatus }
-          : quote,
-      ),
-    }));
-    setQuoteAiNotice(
-      settings.language === "fr"
-        ? `Relance IA envoyée à ${quoteDraft.email.trim()}`
-        : `AI follow-up sent to ${quoteDraft.email.trim()}`,
-    );
-    window.open(
-      `mailto:${encodeURIComponent(quoteDraft.email.trim())}?subject=${encodeURIComponent(quoteDraft.subject)}&body=${encodeURIComponent(quoteDraft.body)}`,
-      "_blank",
-    );
-    setDialog(null);
+  async function sendQuoteDraft() {
+    if (dialog?.kind !== "quote-draft" || !quoteDraft || isSendingQuoteDraft) return;
+    setQuoteDraftError(null);
+    setIsSendingQuoteDraft(true);
+    try {
+      const response = await fetch("/api/email/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: quoteDraft.email,
+          subject: quoteDraft.subject,
+          body: quoteDraft.body,
+        }),
+      });
+      const result: unknown = await response.json();
+      if (!response.ok) {
+        throw new Error(getEmailSendError(result, copy.quotes.emailSendError, copy.invoices.emailNotConfigured));
+      }
+      updateData((current) => ({
+        ...current,
+        quotes: current.quotes.map((quote) =>
+          quote.id === dialog.item.id
+            ? { ...quote, email: quoteDraft.email.trim(), status: "followed-up" }
+            : quote,
+        ),
+      }));
+      const notice = copy.quotes.emailSent(quoteDraft.email.trim());
+      setQuoteAiNotice(notice);
+      setMailNotice(notice);
+      setDialog(null);
+      setQuoteDraft(null);
+    } catch (error) {
+      setQuoteDraftError(error instanceof Error ? error.message : copy.quotes.emailSendError);
+    } finally {
+      setIsSendingQuoteDraft(false);
+    }
   }
 
   function deleteItem(kind: "quotes", id: string): void;
@@ -681,17 +1012,154 @@ export default function FluxoApp() {
     }));
   }
 
-  async function copyMessage(customer: Customer) {
-    const message = copy.customers.message(customer.name, customer.inactiveMonths);
+  function openCustomerMessage(customer: Customer) {
+    setCopyError(null);
+    setCustomerMessageError(null);
+    setCustomerMessageDraft({
+      email: getCustomerEmail(customer)?.trim() ?? "",
+      subject: "",
+      body: "",
+    });
+    setDialog({ kind: "customer-message", item: customer });
+    void generateCustomerMessage(customer);
+  }
+
+  async function generateCustomerMessage(customer: Customer) {
+    if (isGeneratingCustomerMessage || isSendingCustomerMessage) return;
+    if (!hasPlanFeature(settings.plan, "aiEmailReminders")) {
+      requestUpgrade({ kind: "feature", feature: "aiEmailReminders" });
+      return;
+    }
+    if (!requireModuleAccess("recover")) return;
+
+    setCustomerMessageError(null);
+    setMailNotice(null);
+    setIsGeneratingCustomerMessage(true);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 35_000);
     try {
-      await navigator.clipboard.writeText(message);
-      setCopiedCustomerId(customer.id);
-      setCopyError(null);
-      window.setTimeout(() => setCopiedCustomerId(null), 2200);
-    } catch {
-      setCopyError(
-        copy.customers.copyError,
+      const response = await fetch("/api/email/customers/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          name: customer.name,
+          contactName: getCustomerContactName(customer),
+          inactiveMonths: customer.inactiveMonths,
+          language: settings.language,
+        }),
+      });
+      const result: unknown = await response.json();
+      if (!response.ok) {
+        const message = result && typeof result === "object" && "error" in result &&
+          typeof result.error === "string"
+          ? result.error
+          : copy.invoices.aiDraftError;
+        throw new Error(message);
+      }
+      if (
+        !result ||
+        typeof result !== "object" ||
+        !("subject" in result) ||
+        typeof result.subject !== "string" ||
+        !result.subject.trim() ||
+        !("body" in result) ||
+        typeof result.body !== "string" ||
+        !result.body.trim()
+      ) {
+        throw new Error(copy.invoices.aiDraftError);
+      }
+      const subject = result.subject;
+      const body = result.body;
+      setCustomerMessageDraft((current) => current
+        ? { ...current, subject, body }
+        : current);
+    } catch (error) {
+      setCustomerMessageError(
+        error instanceof Error && error.name === "AbortError"
+          ? copy.invoices.aiDraftTimeout
+          : error instanceof Error
+            ? error.message
+            : copy.invoices.aiDraftError,
       );
+    } finally {
+      window.clearTimeout(timeoutId);
+      setIsGeneratingCustomerMessage(false);
+    }
+  }
+
+  async function copyCustomerMessage() {
+    if (
+      dialog?.kind !== "customer-message" ||
+      !customerMessageDraft?.body.trim() ||
+      isGeneratingCustomerMessage ||
+      isSendingCustomerMessage
+    ) return;
+    const body = customerMessageDraft.body.trim();
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(body);
+      } else if (!copyTextFallback(body)) {
+        setCopyError(copy.customers.copyError);
+        return;
+      }
+    } catch {
+      try {
+        if (!copyTextFallback(body)) {
+          setCopyError(copy.customers.copyError);
+          return;
+        }
+      } catch {
+        setCopyError(copy.customers.copyError);
+        return;
+      }
+    }
+    setCopiedCustomerId(dialog.item.id);
+    setCopyError(null);
+    setCustomerMessageDraft(null);
+    setDialog(null);
+    window.setTimeout(() => setCopiedCustomerId(null), 2200);
+  }
+
+  async function sendCustomerMessage() {
+    if (
+      dialog?.kind !== "customer-message" ||
+      !customerMessageDraft ||
+      isGeneratingCustomerMessage ||
+      isSendingCustomerMessage
+    ) return;
+    const customerId = dialog.item.id;
+    setCustomerMessageError(null);
+    setIsSendingCustomerMessage(true);
+    try {
+      const response = await fetch("/api/email/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: customerMessageDraft.email,
+          subject: customerMessageDraft.subject,
+          body: customerMessageDraft.body,
+        }),
+      });
+      const result: unknown = await response.json();
+      if (!response.ok) {
+        throw new Error(getEmailSendError(result, copy.invoices.emailSendError, copy.invoices.emailNotConfigured));
+      }
+      updateData((current) => ({
+        ...current,
+        customers: current.customers.map((customer) =>
+          customer.id === customerId
+            ? { ...customer, email: customerMessageDraft.email.trim() }
+            : customer,
+        ),
+      }));
+      setMailNotice(copy.invoices.emailSent(customerMessageDraft.email.trim()));
+      setCustomerMessageDraft(null);
+      setDialog(null);
+    } catch (error) {
+      setCustomerMessageError(error instanceof Error ? error.message : copy.invoices.emailSendError);
+    } finally {
+      setIsSendingCustomerMessage(false);
     }
   }
 
@@ -935,6 +1403,12 @@ export default function FluxoApp() {
               <span>{copy.shell.storageError} {storageError || settingsError}</span>
             </div>
           )}
+          {subscriptionError && (
+            <div className="copy-alert" role="alert">{subscriptionError}</div>
+          )}
+          {mailNotice && section !== "settings" && section !== "quotes" && (
+            <div className="copy-alert" role="status">{mailNotice}</div>
+          )}
 
           {section === "cockpit" && (
             <Cockpit
@@ -949,6 +1423,7 @@ export default function FluxoApp() {
               plan={settings.plan}
               onNavigate={showSection}
               onCreateQuote={openQuoteDialog}
+              onAiFollowUp={generateQuoteFollowUp}
             />
           )}
 
@@ -963,8 +1438,7 @@ export default function FluxoApp() {
               onEdit={openQuoteDialog}
               onDelete={(id) => deleteItem("quotes", id)}
               onStatusChange={updateQuoteStatus}
-              onAiFollowUp={sendAiQuoteFollowUp}
-              canUseAiFollowUp={hasPlanFeature(settings.plan, "aiEmailReminders")}
+              onAiFollowUp={generateQuoteFollowUp}
               onCreateInvoice={createInvoiceFromQuote}
               onCreateProject={createProjectFromQuote}
               canCreateProject={
@@ -1001,9 +1475,11 @@ export default function FluxoApp() {
               copy={copy}
               language={settings.language}
               onCreate={openInvoiceDialog}
+              onEdit={openInvoiceDialog}
               onPaymentStatusChange={updateInvoicePaymentStatus}
               onDelete={(id) => deleteItem("invoices", id)}
-              onOpenRecover={() => showSection("customers")}
+              onAiFollowUp={generateInvoiceFollowUp}
+              isAiDraftGenerating={isGeneratingInvoiceDraft}
             />
           )}
 
@@ -1060,12 +1536,16 @@ export default function FluxoApp() {
               language={settings.language}
               copiedCustomerId={copiedCustomerId}
               copyError={copyError}
+              isAiDraftGenerating={isGeneratingInvoiceDraft}
+              isCustomerMessageBusy={isGeneratingCustomerMessage || isSendingCustomerMessage}
               onCreate={() => openCustomerDialog()}
               onAddInvoice={openInvoiceDialog}
               onEdit={openCustomerDialog}
               onDelete={(id) => deleteItem("customers", id)}
-              onCopy={copyMessage}
-              onInvoiceStatusChange={updateInvoiceStatus}
+              onPrepareMessage={openCustomerMessage}
+              onAiFollowUp={generateInvoiceFollowUp}
+              onStatusChange={updateInvoiceStatus}
+              onEditInvoice={openInvoiceDialog}
             />
           )}
           {section === "settings" && (
@@ -1075,11 +1555,19 @@ export default function FluxoApp() {
               theme={settings.theme}
               plan={settings.plan}
               hasActiveSubscription={hasActiveSubscription}
+              isCreator={isCreatorAccount}
+              isPlanSimulated={isPlanSimulated}
               workspaceName={settings.workspaceName}
+              gmailStatus={gmailStatus}
+              gmailStatusError={gmailStatusError}
+              isGmailStatusLoading={isGmailStatusLoading}
+              mailNotice={mailNotice}
+              isDisconnectingGmail={isDisconnectingGmail}
               onLanguageChange={(language) => updateSettings((current) => ({ ...current, language }))}
               onThemeChange={(theme: Theme) => updateSettings((current) => ({ ...current, theme }))}
               onCheckout={(selectedPlan) => { window.location.assign(`/api/stripe/checkout?plan=${selectedPlan}`); }}
               onWorkspaceNameChange={(workspaceName) => updateSettings((current) => ({ ...current, workspaceName }))}
+              onDisconnectGmail={disconnectGmail}
             />
           )}
         </div>
@@ -1088,8 +1576,7 @@ export default function FluxoApp() {
       {dialog && (
         <div className="dialog-backdrop" onClick={(event) => {
           if (event.target === event.currentTarget) {
-            setDialog(null);
-            setQuoteDraft(null);
+            closeDialog();
           }
         }}>
           <section className="dialog-card" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
@@ -1098,15 +1585,27 @@ export default function FluxoApp() {
                 <span className="eyebrow">
                   {dialog.kind === "upgrade"
                     ? copy.access.locked
-                    : dialog.kind === "quote-draft"
+                    : dialog.kind === "quote-draft" || dialog.kind === "invoice-draft" || dialog.kind === "quote-generating"
                       ? "IA"
+                    : dialog.kind === "invoice-generating"
+                      ? "IA"
+                    : dialog.kind === "customer-message"
+                      ? copy.customers.eyebrow
                     : dialog.item ? copy.forms.edit : copy.forms.create}
                 </span>
                 <h2 id="dialog-title">
                   {dialog.kind === "upgrade"
                     ? copy.access.upgradeTitle(copy.access.planNames[dialog.requiredPlan])
                     : dialog.kind === "quote-draft"
-                      ? settings.language === "fr" ? "Brouillon de relance IA" : "AI follow-up draft"
+                      ? copy.quotes.draftTitle
+                    : dialog.kind === "quote-generating"
+                      ? copy.quotes.generating
+                    : dialog.kind === "invoice-generating"
+                      ? copy.invoices.generating
+                    : dialog.kind === "invoice-draft"
+                      ? copy.invoices.draftTitle
+                    : dialog.kind === "customer-message"
+                      ? copy.invoices.draftTitle
                     : dialog.kind === "quote"
                       ? dialog.item ? copy.forms.editQuote : copy.forms.addQuote
                       : dialog.kind === "expense"
@@ -1114,7 +1613,7 @@ export default function FluxoApp() {
                       : dialog.kind === "customer"
                         ? dialog.item ? copy.forms.editCustomer : copy.forms.addCustomer
                         : dialog.kind === "invoice"
-                          ? copy.shell.invoice
+                          ? dialog.item ? copy.forms.editInvoice : copy.shell.invoice
                           : dialog.kind === "project"
                             ? dialog.item ? copy.forms.editProject : copy.forms.addProject
                             : dialog.kind === "recurring"
@@ -1122,7 +1621,22 @@ export default function FluxoApp() {
                               : ""}
                 </h2>
               </div>
-              <button className="icon-button dialog-close" onClick={() => { setDialog(null); setQuoteDraft(null); }} aria-label={copy.forms.close}><Icon name="close" /></button>
+              <button
+                type="button"
+                className="icon-button dialog-close"
+                disabled={
+                  isGeneratingInvoiceDraft ||
+                  isSendingInvoiceDraft ||
+                  isGeneratingCustomerMessage ||
+                  isSendingCustomerMessage ||
+                  isGeneratingQuoteDraft ||
+                  isSendingQuoteDraft
+                }
+                onClick={closeDialog}
+                aria-label={copy.forms.close}
+              >
+                <Icon name="close" />
+              </button>
             </div>
 
             {dialog.kind === "upgrade" && (
@@ -1161,20 +1675,189 @@ export default function FluxoApp() {
               </div>
             )}
 
-            {dialog.kind === "quote-draft" && quoteDraft && (
-              <div className="quote-draft">
+            {dialog.kind === "invoice-generating" && (
+              <div className="invoice-draft-loading" role="status" aria-live="polite">
+                <span className="loading-mark">F</span>
+                <p>{copy.invoices.generating}</p>
+              </div>
+            )}
+
+            {dialog.kind === "quote-generating" && (
+              <div className="invoice-draft-loading" role="status" aria-live="polite">
+                <span className="loading-mark">F</span>
+                <p>{copy.quotes.generating}</p>
+              </div>
+            )}
+
+            {dialog.kind === "invoice-draft" && invoiceDraft && (
+              <form className="quote-draft" onSubmit={(event) => {
+                event.preventDefault();
+                void sendInvoiceFollowUp();
+              }}>
                 <label className="field field-wide">
-                  {settings.language === "fr" ? "Adresse e-mail du destinataire" : "Recipient email address"}
+                  {copy.invoices.recipientEmail}
+                  <input
+                    type="email"
+                    required
+                    value={invoiceDraft.email}
+                    placeholder={copy.forms.customerEmailPlaceholder}
+                    onChange={(event) => setInvoiceDraft((current) => current ? { ...current, email: event.target.value } : current)}
+                  />
+                </label>
+                <label className="field field-wide">
+                  {copy.invoices.subject}
+                  <input
+                    type="text"
+                    required
+                    value={invoiceDraft.subject}
+                    onChange={(event) => setInvoiceDraft((current) => current ? { ...current, subject: event.target.value } : current)}
+                  />
+                </label>
+                <label className="field field-wide">
+                  {copy.invoices.message}
+                  <textarea
+                    className="quote-draft-body"
+                    required
+                    value={invoiceDraft.body}
+                    onChange={(event) => setInvoiceDraft((current) => current ? { ...current, body: event.target.value } : current)}
+                  />
+                </label>
+                {invoiceDraftError && <p className="form-error" role="alert">{invoiceDraftError}</p>}
+                <div className="quote-draft-actions">
+                  <button
+                    type="button"
+                    className="button button-quiet"
+                    disabled={isGeneratingInvoiceDraft || isSendingInvoiceDraft}
+                    onClick={() => generateInvoiceFollowUp(dialog.item, invoiceDraft.email)}
+                  >
+                    <Icon name="spark" size={15} />
+                    {copy.invoices.regenerate}
+                  </button>
+                  <div>
+                    <button type="button" className="button button-quiet" onClick={closeDialog}>
+                      {copy.forms.cancel}
+                    </button>
+                    <button
+                      type="submit"
+                      className="button button-primary"
+                      disabled={isSendingInvoiceDraft || !invoiceDraft.subject.trim() || !invoiceDraft.body.trim()}
+                    >
+                      <Icon name="send" size={15} />
+                      {isSendingInvoiceDraft ? copy.invoices.sending : copy.invoices.sendEmail}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            )}
+
+            {dialog.kind === "customer-message" && customerMessageDraft !== null && (
+              <form className="quote-draft" onSubmit={(event) => {
+                event.preventDefault();
+                void sendCustomerMessage();
+              }}>
+                <label className="field field-wide">
+                  {copy.invoices.recipientEmail}
+                  <input
+                    type="email"
+                    maxLength={254}
+                    required
+                    value={customerMessageDraft.email}
+                    placeholder={copy.forms.customerEmailPlaceholder}
+                    disabled={isGeneratingCustomerMessage || isSendingCustomerMessage}
+                    onChange={(event) => setCustomerMessageDraft((current) => current
+                      ? { ...current, email: event.target.value }
+                      : current)}
+                    data-dialog-autofocus
+                  />
+                </label>
+                <label className="field field-wide">
+                  {copy.invoices.subject}
+                  <input
+                    type="text"
+                    maxLength={200}
+                    required
+                    value={customerMessageDraft.subject}
+                    disabled={isGeneratingCustomerMessage || isSendingCustomerMessage}
+                    onChange={(event) => setCustomerMessageDraft((current) => current
+                      ? { ...current, subject: event.target.value }
+                      : current)}
+                  />
+                </label>
+                <label className="field field-wide">
+                  {copy.invoices.message}
+                  <textarea
+                    className="quote-draft-body"
+                    required
+                    maxLength={8000}
+                    value={customerMessageDraft.body}
+                    disabled={isGeneratingCustomerMessage || isSendingCustomerMessage}
+                    onChange={(event) => setCustomerMessageDraft((current) => current
+                      ? { ...current, body: event.target.value }
+                      : current)}
+                  />
+                </label>
+                {copyError && <p className="form-error" role="alert">{copyError}</p>}
+                {customerMessageError && <p className="form-error" role="alert">{customerMessageError}</p>}
+                <div className="quote-draft-actions customer-message-actions">
+                  <button
+                    type="button"
+                    className="button button-quiet"
+                    disabled={isGeneratingCustomerMessage || isSendingCustomerMessage}
+                    onClick={() => generateCustomerMessage(dialog.item)}
+                  >
+                    <Icon name="spark" size={15} />
+                    {isGeneratingCustomerMessage
+                      ? copy.customers.generateWithAiLoading
+                      : copy.customers.generateWithAi}
+                  </button>
+                  <div>
+                    <button
+                      type="button"
+                      className="button button-quiet"
+                      disabled={isGeneratingCustomerMessage || isSendingCustomerMessage}
+                      onClick={closeDialog}
+                    >
+                      {copy.forms.cancel}
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-quiet"
+                      disabled={!customerMessageDraft.body.trim() || isGeneratingCustomerMessage || isSendingCustomerMessage}
+                      onClick={() => void copyCustomerMessage()}
+                    >
+                      <Icon name="document" size={15} />
+                      {copy.customers.copyMessage}
+                    </button>
+                    <button
+                      type="submit"
+                      className="button button-primary"
+                      disabled={isGeneratingCustomerMessage || isSendingCustomerMessage || !customerMessageDraft.email.trim() || !customerMessageDraft.subject.trim() || !customerMessageDraft.body.trim()}
+                    >
+                      <Icon name="send" size={15} />
+                      {isSendingCustomerMessage ? copy.invoices.sending : copy.customers.sendMessage}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            )}
+
+            {dialog.kind === "quote-draft" && quoteDraft && (
+              <form className="quote-draft" onSubmit={(event) => {
+                event.preventDefault();
+                void sendQuoteDraft();
+              }}>
+                <label className="field field-wide">
+                  {copy.quotes.recipientEmail}
                   <input
                     type="email"
                     required
                     value={quoteDraft.email}
-                    placeholder="client@exemple.com"
+                    placeholder={copy.forms.customerEmailPlaceholder}
                     onChange={(event) => setQuoteDraft((current) => current ? { ...current, email: event.target.value } : current)}
                   />
                 </label>
                 <label className="field field-wide">
-                  {settings.language === "fr" ? "Objet" : "Subject"}
+                  {copy.quotes.subject}
                   <input
                     type="text"
                     required
@@ -1183,7 +1866,7 @@ export default function FluxoApp() {
                   />
                 </label>
                 <label className="field field-wide">
-                  {settings.language === "fr" ? "Message" : "Message"}
+                  {copy.quotes.message}
                   <textarea
                     className="quote-draft-body"
                     required
@@ -1191,31 +1874,32 @@ export default function FluxoApp() {
                     onChange={(event) => setQuoteDraft((current) => current ? { ...current, body: event.target.value } : current)}
                   />
                 </label>
+                {quoteDraftError && <p className="form-error" role="alert">{quoteDraftError}</p>}
                 <div className="quote-draft-actions">
                   <button
                     type="button"
                     className="button button-quiet"
-                    onClick={() => setQuoteDraft(buildQuoteDraft(dialog.item))}
+                    disabled={isGeneratingQuoteDraft || isSendingQuoteDraft}
+                    onClick={() => generateQuoteFollowUp(dialog.item)}
                   >
                     <Icon name="spark" size={15} />
-                    {settings.language === "fr" ? "Régénérer avec l’IA" : "Regenerate with AI"}
+                    {copy.quotes.regenerate}
                   </button>
                   <div>
-                    <button type="button" className="button button-quiet" onClick={() => { setDialog(null); setQuoteDraft(null); }}>
-                      {settings.language === "fr" ? "Annuler" : "Cancel"}
+                    <button type="button" className="button button-quiet" onClick={closeDialog}>
+                      {copy.forms.cancel}
                     </button>
                     <button
-                      type="button"
+                      type="submit"
                       className="button button-primary"
-                      disabled={!quoteDraft.email.trim() || !quoteDraft.subject.trim() || !quoteDraft.body.trim()}
-                      onClick={sendQuoteDraft}
+                      disabled={isSendingQuoteDraft || !quoteDraft.email.trim() || !quoteDraft.subject.trim() || !quoteDraft.body.trim()}
                     >
                       <Icon name="send" size={15} />
-                      {settings.language === "fr" ? "Envoyer l’e-mail" : "Send email"}
+                      {isSendingQuoteDraft ? copy.quotes.sending : copy.quotes.confirmAndSend}
                     </button>
                   </div>
                 </div>
-              </div>
+              </form>
             )}
 
             {dialog.kind === "quote" && (
@@ -1292,25 +1976,28 @@ export default function FluxoApp() {
             {dialog.kind === "invoice" && (
               <form className="form-grid" onSubmit={saveInvoice}>
                 {data.customers.length > 0 && <label className="field field-wide">{copy.forms.selectClient}
-                  <select name="customerId" defaultValue="">
+                  <select name="customerId" defaultValue={dialog.item?.customerId ?? ""}>
                     <option value="">{copy.forms.newCustomer}</option>
                     {data.customers.map((customer) => <option value={customer.id} key={customer.id}>{customer.name}</option>)}
                   </select>
                 </label>}
                 <label className="field">{copy.forms.invoiceNumber}
-                  <input name="number" required maxLength={40} placeholder="FA-2026-0438" />
+                  <input name="number" required maxLength={40} placeholder="FA-2026-0438" defaultValue={dialog.item?.number ?? ""} />
                 </label>
                 <label className="field">{copy.forms.company}
-                  <input name="company" maxLength={120} placeholder={copy.forms.companyPlaceholder} />
+                  <input name="company" maxLength={120} placeholder={copy.forms.companyPlaceholder} defaultValue={dialog.item?.company ?? ""} />
                 </label>
                 <label className="field field-wide">{copy.forms.contactName}
-                  <input name="contact" maxLength={160} placeholder={copy.forms.contactPlaceholder} />
+                  <input name="contact" maxLength={160} placeholder={copy.forms.contactPlaceholder} defaultValue={dialog.item?.contact ?? ""} />
+                </label>
+                <label className="field field-wide">{copy.forms.customerEmail}
+                  <input name="email" type="email" maxLength={254} placeholder={copy.forms.customerEmailPlaceholder} defaultValue={dialog.item?.email ?? ""} />
                 </label>
                 <label className="field">{settings.language === "fr" ? "Montant (€)" : "Amount (€)"}
-                  <input name="amount" type="number" min="0.01" step="0.01" required placeholder="0,00" />
+                  <input name="amount" type="number" min="0.01" step="0.01" required placeholder="0,00" defaultValue={dialog.item?.amount ?? ""} />
                 </label>
                 <label className="field">{copy.forms.dueDate}
-                  <input name="dueDate" type="date" required defaultValue={new Date().toISOString().slice(0, 10)} />
+                  <input name="dueDate" type="date" required defaultValue={dialog.item?.dueDate ?? new Date().toISOString().slice(0, 10)} />
                 </label>
                 <FormActions copy={copy} onCancel={() => setDialog(null)} />
               </form>
@@ -1395,6 +2082,7 @@ function Cockpit({
   plan,
   onNavigate,
   onCreateQuote,
+  onAiFollowUp,
 }: {
   quotes: Quote[];
   customers: Customer[];
@@ -1407,6 +2095,7 @@ function Cockpit({
   plan: PlanId;
   onNavigate: (section: Section) => void;
   onCreateQuote: () => void;
+  onAiFollowUp: (quote: Quote) => void;
 }) {
   const potential = customers
     .filter((customer) => customer.inactiveMonths >= 6)
@@ -1523,9 +2212,11 @@ function Cockpit({
                     <span>{copy.quotes.amount}</span>
                     <span>{copy.quotes.probability}</span>
                     <span>{copy.quotes.status}</span>
+                    <span>{copy.cockpit.followUpPossibility}</span>
                     <span>{copy.quotes.added}</span>
                   </div>
                   {recentQuotes.map((quote) => {
+                  const canFollowUp = quote.status === "pending" || quote.status === "followed-up";
                   const probability = Number.isFinite(quote.probability) ? quote.probability : 50;
                   const parsedDate = new Date(quote.createdAt);
                   const date = Number.isNaN(parsedDate.getTime())
@@ -1550,6 +2241,26 @@ function Cockpit({
                         {probability}%
                       </span>
                       <span className={`recent-status status-${quote.status}`}>{getQuoteStatusLabel(quote.status, copy)}</span>
+                      <span className="recent-follow-up">
+                        <span className={`follow-up-badge ${canFollowUp ? "available" : "unavailable"}`}>
+                          {quote.status === "pending"
+                            ? copy.cockpit.followUpAvailable
+                            : quote.status === "followed-up"
+                              ? copy.cockpit.followUpAlreadySent
+                              : copy.cockpit.followUpNotRelevant}
+                        </span>
+                        {canFollowUp && (
+                          <button
+                            type="button"
+                            className="button button-quiet recent-ai-follow-up"
+                            onClick={() => onAiFollowUp(quote)}
+                            aria-label={`${copy.cockpit.aiFollowUp}: ${quote.client}`}
+                          >
+                            <Icon name="spark" size={13} />
+                            <span>{copy.cockpit.aiFollowUp}</span>
+                          </button>
+                        )}
+                      </span>
                       <time className="recent-date" dateTime={date.toISOString()}>{dateLabel}</time>
                     </div>
                   );
@@ -1634,7 +2345,6 @@ function QuotesPage({
   onDelete,
   onStatusChange,
   onAiFollowUp,
-  canUseAiFollowUp,
   onCreateInvoice,
   onCreateProject,
   canCreateProject,
@@ -1652,7 +2362,6 @@ function QuotesPage({
   onDelete: (id: string) => void;
   onStatusChange: (id: string, status: QuoteStatus) => void;
   onAiFollowUp: (item: Quote) => void;
-  canUseAiFollowUp: boolean;
   onCreateInvoice: (item: Quote) => void;
   onCreateProject: (item: Quote) => void;
   canCreateProject: boolean;
@@ -1680,7 +2389,12 @@ function QuotesPage({
                 <td className="date-cell">{new Intl.DateTimeFormat(language === "fr" ? "fr-FR" : "en-GB", { day: "numeric", month: "short", year: "numeric" }).format(new Date(quote.createdAt))}</td>
                 <td><div className="row-actions">
                   {(quote.status === "pending" || quote.status === "followed-up") && <button className={`row-action follow-action ${quote.status === "followed-up" ? "active" : ""}`} onClick={() => onStatusChange(quote.id, "followed-up")} aria-label={`${copy.quotes.followAction} ${quote.client}`} title={copy.quotes.followTitle}><Icon name="send" size={15} /></button>}
-                  <button className={`row-action ai-action ${!canUseAiFollowUp ? "locked" : ""}`} onClick={() => onAiFollowUp(quote)} aria-label={`${copy.quotes.aiFollowUp} ${quote.client}${canUseAiFollowUp ? "" : ` — ${copy.access.locked}`}`} title={canUseAiFollowUp ? copy.quotes.aiFollowUp : `${copy.quotes.aiFollowUp} — ${copy.access.locked}`}><Icon name={canUseAiFollowUp ? "spark" : "lock"} size={15} /><span>{copy.quotes.aiFollowUp}</span></button>
+                  {(quote.status === "pending" || quote.status === "followed-up") && (
+                    <button className="row-action ai-action" onClick={() => onAiFollowUp(quote)} aria-label={`${copy.quotes.aiFollowUp} ${quote.client}`} title={copy.quotes.aiFollowUp}>
+                      <Icon name="spark" size={15} />
+                      <span>{copy.quotes.aiFollowUp}</span>
+                    </button>
+                  )}
                   {quote.status === "signed" && <>
                     <button className={`row-action convert-action ${!canCreateInvoice ? "locked" : ""}`} disabled={invoiceQuoteIds.has(quote.id)} onClick={() => onCreateInvoice(quote)} aria-label={`${copy.quotes.createInvoice}: ${quote.client}${canCreateInvoice ? "" : ` — ${copy.access.locked}`}`} title={invoiceQuoteIds.has(quote.id) ? copy.quotes.converted : canCreateInvoice ? copy.quotes.createInvoice : `${copy.quotes.createInvoice} — ${copy.access.locked}`}>
                       <Icon name={invoiceQuoteIds.has(quote.id) ? "check" : canCreateInvoice ? "document" : "lock"} size={15} />
@@ -1771,7 +2485,7 @@ function ClientsPage({
                 {expanded && <tr className="client-history-row"><td colSpan={5}>
                   <div className="client-history">
                     {customerQuotes.map((quote) => <span key={`quote-${quote.id}`}><Icon name="document" size={14} />{copy.navigation.quotes} · {formatCurrency(quote.amount, language)} · {getQuoteStatusLabel(quote.status, copy)}</span>)}
-                    {customerInvoices.map((invoice) => <span key={`invoice-${invoice.id}`}><Icon name="wallet" size={14} />{copy.navigation.invoices} · {invoice.number} · {formatCurrency(invoice.amount, language)} · {invoice.status === "never" ? copy.invoices.reminderNever : invoice.status === "relanced" ? copy.invoices.reminderSent : copy.invoices.reminderReady}</span>)}
+                    {customerInvoices.map((invoice) => <span key={`invoice-${invoice.id}`}><Icon name="wallet" size={14} />{copy.navigation.invoices} · {invoice.number} · {formatCurrency(invoice.amount, language)} · {getInvoiceReminderLabel(invoice.status, copy)}</span>)}
                     {customerProjects.map((project) => <span key={`project-${project.id}`}><Icon name="briefcase" size={14} />{copy.navigation.projects} · {project.name}</span>)}
                     {historyCount === 0 && <span>{copy.clients.historyItems(0)}</span>}
                   </div>
@@ -1789,18 +2503,22 @@ function InvoicesPage({
   invoices,
   copy,
   language,
+  isAiDraftGenerating,
   onCreate,
+  onEdit,
   onPaymentStatusChange,
   onDelete,
-  onOpenRecover,
+  onAiFollowUp,
 }: {
   invoices: Invoice[];
   copy: Copy;
   language: Language;
+  isAiDraftGenerating: boolean;
   onCreate: () => void;
+  onEdit: (item: Invoice) => void;
   onPaymentStatusChange: (id: string, status: "pending" | "paid") => void;
   onDelete: (id: string) => void;
-  onOpenRecover: () => void;
+  onAiFollowUp: (invoice: Invoice) => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const outstanding = invoices.filter((invoice) => getInvoicePaymentState(invoice) !== "paid");
@@ -1820,7 +2538,7 @@ function InvoicesPage({
         <section className="surface data-surface">
           <div className="table-heading"><div><h2>{copy.invoices.tableTitle}</h2><span>{invoices.length}</span></div></div>
           <div className="table-scroll"><table className="invoice-table">
-            <thead><tr><th>{copy.invoices.invoice}</th><th>{copy.invoices.client}</th><th>{copy.invoices.amount}</th><th>{copy.invoices.dueDate}</th><th>{copy.invoices.status}</th><th>{copy.invoices.reminder}</th><th><span className="sr-only">{copy.common.delete}</span></th></tr></thead>
+            <thead><tr><th>{copy.invoices.invoice}</th><th>{copy.invoices.client}</th><th>{copy.invoices.amount}</th><th>{copy.invoices.dueDate}</th><th>{copy.invoices.status}</th><th>{copy.invoices.reminder}</th><th><span className="sr-only">{copy.common.actions}</span></th></tr></thead>
             <tbody>{[...invoices].sort((a, b) => a.dueDate.localeCompare(b.dueDate)).map((invoice) => {
               const status = getInvoicePaymentState(invoice);
               return <tr key={invoice.id}>
@@ -1832,8 +2550,11 @@ function InvoicesPage({
                   <option value="pending">{status === "overdue" ? copy.invoices.overdue : copy.invoices.pending}</option>
                   <option value="paid">{copy.invoices.paid}</option>
                 </select></td>
-                <td>{status !== "paid" && <button className="reactivate-button" onClick={onOpenRecover}><Icon name="send" size={14} />{copy.invoices.recover}</button>}</td>
-                <td><button className={`row-action delete-action ${confirmDelete === invoice.id ? "confirming" : ""}`} onClick={() => { if (confirmDelete === invoice.id) { onDelete(invoice.id); setConfirmDelete(null); } else setConfirmDelete(invoice.id); }} aria-label={confirmDelete === invoice.id ? copy.common.confirmDelete : `${copy.common.delete}: ${invoice.number}`} title={confirmDelete === invoice.id ? copy.common.confirm : copy.common.delete}><Icon name="trash" size={15} />{confirmDelete === invoice.id && <span>{copy.common.confirm}</span>}</button></td>
+                <td>{status !== "paid" && <button type="button" className="reactivate-button" disabled={isAiDraftGenerating} aria-busy={isAiDraftGenerating} onClick={() => onAiFollowUp(invoice)}><Icon name="spark" size={14} />{isAiDraftGenerating ? copy.invoices.generating : copy.invoices.aiFollowUp}</button>}</td>
+                <td><div className="row-actions">
+                  <button type="button" className="row-action" onClick={() => onEdit(invoice)} aria-label={`${copy.forms.editInvoice}: ${invoice.number}`} title={copy.forms.editInvoice}><Icon name="edit" size={15} /></button>
+                  <button type="button" className={`row-action delete-action ${confirmDelete === invoice.id ? "confirming" : ""}`} onClick={() => { if (confirmDelete === invoice.id) { onDelete(invoice.id); setConfirmDelete(null); } else setConfirmDelete(invoice.id); }} aria-label={confirmDelete === invoice.id ? copy.common.confirmDelete : `${copy.common.delete}: ${invoice.number}`} title={confirmDelete === invoice.id ? copy.common.confirm : copy.common.delete}><Icon name="trash" size={15} />{confirmDelete === invoice.id && <span>{copy.common.confirm}</span>}</button>
+                </div></td>
               </tr>;
             })}</tbody>
           </table></div>
@@ -1997,12 +2718,16 @@ function CustomersPage({
   language,
   copiedCustomerId,
   copyError,
+  isAiDraftGenerating,
+  isCustomerMessageBusy,
   onCreate,
   onAddInvoice,
   onEdit,
   onDelete,
-  onCopy,
-  onInvoiceStatusChange,
+  onPrepareMessage,
+  onAiFollowUp,
+  onStatusChange,
+  onEditInvoice,
 }: {
   customers: Customer[];
   invoices: Invoice[];
@@ -2010,12 +2735,16 @@ function CustomersPage({
   language: Language;
   copiedCustomerId: string | null;
   copyError: string | null;
+  isAiDraftGenerating: boolean;
+  isCustomerMessageBusy: boolean;
   onCreate: () => void;
   onAddInvoice: () => void;
   onEdit: (item: Customer) => void;
   onDelete: (id: string) => void;
-  onCopy: (item: Customer) => void;
-  onInvoiceStatusChange: (id: string, status: "never" | "relanced" | "ai-ready") => void;
+  onPrepareMessage: (item: Customer) => void;
+  onAiFollowUp: (invoice: Invoice) => void;
+  onStatusChange: (id: string, status: InvoiceStatus) => void;
+  onEditInvoice: (item: Invoice) => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const invoiceItems = invoices.filter((invoice) => getInvoicePaymentState(invoice) !== "paid");
@@ -2026,16 +2755,6 @@ function CustomersPage({
   const delayedMedium = invoiceItems.filter((invoice) => getInvoiceDaysLate(invoice) > 15 && getInvoiceDaysLate(invoice) <= 30).length;
   const delayedLong = invoiceItems.filter((invoice) => getInvoiceDaysLate(invoice) > 30).length;
 
-  function relanceInvoice(invoice: Invoice) {
-    const subject = language === "fr"
-      ? `Relance concernant la facture ${invoice.number}`
-      : `Follow-up regarding invoice ${invoice.number}`;
-    const body = language === "fr"
-      ? `Bonjour ${invoice.contact},\n\nNous revenons vers vous concernant la facture ${invoice.number} d’un montant de ${formatCurrency(invoice.amount, language)}, arrivée à échéance le ${new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", year: "numeric" }).format(new Date(invoice.dueDate))}.\n\nPouvez-vous nous confirmer le règlement prévu ?\n\nBien cordialement`
-      : `Hello ${invoice.contact},\n\nWe are following up on invoice ${invoice.number} for ${formatCurrency(invoice.amount, language)}, due on ${new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" }).format(new Date(invoice.dueDate))}.\n\nCould you confirm the planned payment date?\n\nKind regards`;
-    onInvoiceStatusChange(invoice.id, "relanced");
-    window.open(`mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`, "_blank");
-  }
   return (
     <>
       <PageIntro eyebrow={copy.customers.eyebrow} title={copy.pages.customers.title} description={copy.pages.customers.description} buttonLabel={copy.customers.add} onCreate={onCreate} />
@@ -2059,7 +2778,7 @@ function CustomersPage({
         </div>
         <div className="table-scroll">
           <table className="invoice-table">
-            <thead><tr><th>{language === "fr" ? "Facture" : "Invoice"}</th><th>{language === "fr" ? "Client" : "Customer"}</th><th>{language === "fr" ? "Montant" : "Amount"}</th><th>{language === "fr" ? "Échéance" : "Due date"}</th><th>{language === "fr" ? "Retard" : "Delay"}</th><th>{language === "fr" ? "Statut" : "Status"}</th><th><span className="sr-only">{language === "fr" ? "Action" : "Action"}</span></th></tr></thead>
+            <thead><tr><th>{language === "fr" ? "Facture" : "Invoice"}</th><th>{language === "fr" ? "Client" : "Customer"}</th><th>{language === "fr" ? "Montant" : "Amount"}</th><th>{language === "fr" ? "Échéance" : "Due date"}</th><th>{language === "fr" ? "Retard" : "Delay"}</th><th>{language === "fr" ? "Statut" : "Status"}</th><th><span className="sr-only">{copy.common.actions}</span></th></tr></thead>
             <tbody>{invoiceItems.map((invoice) => (
               <tr key={invoice.id}>
                 <td><strong className="invoice-number">{invoice.number}</strong></td>
@@ -2067,10 +2786,23 @@ function CustomersPage({
                 <td className="amount-cell">{formatCurrency(invoice.amount, language)}</td>
                 <td className="muted-cell">{new Intl.DateTimeFormat(language === "fr" ? "fr-FR" : "en-GB", { day: "numeric", month: "short", year: "numeric" }).format(new Date(invoice.dueDate))}</td>
                 <td><span className={`delay-badge ${getInvoiceDaysLate(invoice) >= 30 ? "delay-critical" : getInvoiceDaysLate(invoice) >= 15 ? "delay-medium" : ""}`}>{getInvoiceDaysLate(invoice)}{language === "fr" ? "j" : "d"}</span></td>
-                <td><span className={`invoice-status invoice-status-${invoice.status}`}>
-                  {invoice.status === "never" ? copy.invoices.reminderNever : invoice.status === "relanced" ? copy.invoices.reminderSent : copy.invoices.reminderReady}
-                </span></td>
-                <td><button type="button" className="reactivate-button" onClick={() => relanceInvoice(invoice)}><Icon name="spark" size={14} />{language === "fr" ? "Générer la relance IA" : "Generate AI follow-up"}</button></td>
+                <td>
+                  <select
+                    className={`status-select invoice-reminder-select status-${invoice.status}`}
+                    value={invoice.status}
+                    onChange={(event) => onStatusChange(invoice.id, event.target.value as InvoiceStatus)}
+                    aria-label={`${copy.invoices.reminder}: ${invoice.number}`}
+                  >
+                    <option value="never">{copy.invoices.reminderNever}</option>
+                    <option value="relanced">{copy.invoices.reminderSent}</option>
+                    <option value="relanced-with-response">{copy.invoices.reminderReplied}</option>
+                    {invoice.status === "ai-ready" && <option value="ai-ready">{copy.invoices.reminderReady}</option>}
+                  </select>
+                </td>
+                <td><div className="row-actions">
+                  <button type="button" className="row-action" onClick={() => onEditInvoice(invoice)} aria-label={`${copy.forms.editInvoice}: ${invoice.number}`} title={copy.forms.editInvoice}><Icon name="edit" size={15} /></button>
+                  <button type="button" className="reactivate-button" disabled={isAiDraftGenerating} aria-busy={isAiDraftGenerating} onClick={() => onAiFollowUp(invoice)}><Icon name="spark" size={14} />{isAiDraftGenerating ? copy.invoices.generating : copy.invoices.aiFollowUp}</button>
+                </div></td>
               </tr>
             ))}</tbody>
           </table>
@@ -2088,7 +2820,7 @@ function CustomersPage({
                 <td><span className="client-cell"><span className="table-avatar customer-avatar">{customer.name.trim().slice(0, 1).toLocaleUpperCase()}</span><strong>{customer.name}</strong></span></td><td className="muted-cell">{customer.contact}</td><td className="amount-cell">{formatCurrency(customer.lastAmount, language)}</td><td>{customer.inactiveMonths} {copy.customers.months}</td>
                 <td>{needsFollowUp ? <span className="reactivation-badge"><span />{copy.customers.reactivate}</span> : <span className="ok-badge"><Icon name="check" size={14} />{copy.customers.active}</span>}</td>
                 <td><div className="row-actions">
-                  {needsFollowUp && <button className={`reactivate-button ${copiedCustomerId === customer.id ? "copied" : ""}`} onClick={() => onCopy(customer)}><Icon name={copiedCustomerId === customer.id ? "check" : "send"} size={14} />{copiedCustomerId === customer.id ? copy.customers.copied : copy.customers.prepareMessage}</button>}
+                  {needsFollowUp && <button type="button" className={`reactivate-button ${copiedCustomerId === customer.id ? "copied" : ""}`} disabled={isCustomerMessageBusy} aria-busy={isCustomerMessageBusy} onClick={() => onPrepareMessage(customer)}><Icon name={copiedCustomerId === customer.id ? "check" : "spark"} size={14} />{isCustomerMessageBusy ? copy.customers.generateWithAiLoading : copiedCustomerId === customer.id ? copy.customers.copied : copy.customers.generateWithAi}</button>}
                   <button className="row-action" onClick={() => onEdit(customer)} aria-label={`${copy.customers.edit} ${customer.name}`} title={copy.customers.edit}><Icon name="edit" size={15} /></button>
                   <button className={`row-action delete-action ${confirmDelete === customer.id ? "confirming" : ""}`} onClick={() => { if (confirmDelete === customer.id) { onDelete(customer.id); setConfirmDelete(null); } else setConfirmDelete(customer.id); }} aria-label={confirmDelete === customer.id ? copy.customers.confirmDelete : `${copy.customers.delete} ${customer.name}`} title={confirmDelete === customer.id ? copy.customers.confirm : copy.customers.delete}><Icon name="trash" size={15} />{confirmDelete === customer.id && <span>{copy.customers.confirm}</span>}</button>
                 </div></td>

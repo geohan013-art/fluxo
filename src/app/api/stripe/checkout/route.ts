@@ -2,6 +2,10 @@ import Stripe from "stripe";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { isPlanId, type PlanId } from "@/lib/plans";
+import {
+  isCreatorUser,
+  isPlanSimulationEnabled,
+} from "@/lib/subscription-server";
 
 const PRICE_IDS: Record<PlanId, string> = {
   standard: "price_1UeIfiD5P1RiKWY3U7S7AlG3",
@@ -14,6 +18,18 @@ export async function GET(request: Request) {
   const { data: { user }, error } = await supabase.auth.getUser();
   if (error || !user) {
     return NextResponse.redirect(new URL("/connexion?next=/settings", new URL(request.url).origin));
+  }
+  if (isPlanSimulationEnabled()) {
+    return NextResponse.json(
+      { error: "Le checkout Stripe est désactivé pendant la simulation locale." },
+      { status: 403 },
+    );
+  }
+  if (isCreatorUser(user)) {
+    return NextResponse.json(
+      { error: "Le compte créateur bénéficie déjà de l’accès complet." },
+      { status: 403 },
+    );
   }
   const url = new URL(request.url);
   const requestedPlan = url.searchParams.get("plan") ?? "standard";

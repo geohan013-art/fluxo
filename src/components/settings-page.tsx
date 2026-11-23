@@ -28,22 +28,38 @@ export default function SettingsPage({
   theme,
   plan,
   hasActiveSubscription,
+  isCreator,
+  isPlanSimulated,
   workspaceName,
+  gmailStatus,
+  gmailStatusError,
+  isGmailStatusLoading,
+  mailNotice,
+  isDisconnectingGmail,
   onLanguageChange,
   onThemeChange,
   onCheckout,
   onWorkspaceNameChange,
+  onDisconnectGmail,
 }: {
   copy: Copy;
   language: Language;
   theme: Theme;
   plan: PlanId;
   hasActiveSubscription: boolean;
+  isCreator: boolean;
+  isPlanSimulated: boolean;
   workspaceName: string;
+  gmailStatus: { configured: boolean; connected: boolean; email: string | null };
+  gmailStatusError: string | null;
+  isGmailStatusLoading: boolean;
+  mailNotice: string | null;
+  isDisconnectingGmail: boolean;
   onLanguageChange: (language: Language) => void;
   onThemeChange: (theme: Theme) => void;
   onCheckout: (plan: PlanId) => void;
   onWorkspaceNameChange: (name: string) => void;
+  onDisconnectGmail: () => void;
 }) {
   const setWorkspaceName = (event: ChangeEvent<HTMLInputElement>) => {
     onWorkspaceNameChange(event.target.value);
@@ -134,13 +150,49 @@ export default function SettingsPage({
             </label>
             <p className="settings-footnote">{copy.settings.savedLocally}</p>
           </section>
+
+          <section className="surface settings-card settings-email-card">
+            <div className="settings-card-heading">
+              <span className="settings-icon"><EmailIcon /></span>
+              <div>
+                <h2>{copy.settings.gmailTitle}</h2>
+                <p>{copy.settings.gmailDescription}</p>
+              </div>
+            </div>
+            {isGmailStatusLoading ? (
+              <p className="settings-footnote" role="status">{copy.settings.gmailChecking}</p>
+            ) : gmailStatus.connected && gmailStatus.email ? (
+              <p className="settings-footnote" role="status">{copy.settings.gmailConnectedAs(gmailStatus.email)}</p>
+            ) : (
+              <p className="settings-footnote" role="status">
+                {gmailStatusError || (gmailStatus.configured ? copy.settings.gmailNotConnected : copy.settings.gmailNotConfigured)}
+              </p>
+            )}
+            {mailNotice && <p className="settings-footnote" role="status">{mailNotice}</p>}
+            <div className="settings-email-actions">
+              {gmailStatus.connected ? (
+                <button
+                  type="button"
+                  className="button button-quiet"
+                  disabled={isDisconnectingGmail}
+                  onClick={onDisconnectGmail}
+                >
+                  {copy.settings.gmailDisconnect}
+                </button>
+              ) : gmailStatus.configured ? (
+                <a className="button button-primary" href="/api/email/gmail/connect">
+                  {copy.invoices.gmailConnect}
+                </a>
+              ) : null}
+            </div>
+          </section>
         </div>
 
         <aside className="settings-aside" id="plan-options">
           <div className="plan-aside-heading">
             <span className="eyebrow">{copy.settings.plansEyebrow}</span>
             <h2>{copy.settings.plansTitle}</h2>
-            <p>{copy.settings.plansDescription}</p>
+            <p>{isCreator ? copy.settings.creatorAccess : copy.settings.plansDescription}</p>
           </div>
           <div className="plan-list">
             {PLAN_IDS.map((planId) => {
@@ -157,7 +209,7 @@ export default function SettingsPage({
                   className={`plan-card ${isCurrent ? "selected" : ""} ${planId === "pro" ? "recommended" : ""} ${planId === "pro_max" ? "pro_max" : ""}`}
                   key={planId}
                 >
-                  {isCurrent && <span className="plan-current">{copy.settings.currentPlan}</span>}
+                  {isCurrent && <span className="plan-current">{isCreator ? copy.settings.creatorBadge : copy.settings.currentPlan}</span>}
                   {planId === "pro" && <span className="plan-badge plan-badge-recommended">{copy.settings.recommended}</span>}
                   {planId === "pro_max" && <span className="plan-badge plan-badge-pro_max">{copy.settings.topPlan}</span>}
                   <div className="plan-card-top">
@@ -200,27 +252,48 @@ export default function SettingsPage({
                   <span className="plan-billing-label">{copy.settings.monthlyPrice}</span>
                   <button
                     type="button"
-                    className="plan-action"
+                    className={`plan-action ${isCreator ? "creator-included" : ""}`}
                     aria-pressed={isCurrent}
-                    disabled={isCurrent}
+                    disabled={isCurrent || isCreator || isPlanSimulated}
                     onClick={(event) => {
                       event.stopPropagation();
-                      if (!isCurrent) onCheckout(planId);
+                      if (!isCurrent && !isCreator && !isPlanSimulated) onCheckout(planId);
                     }}
                   >
-                    {isCurrent
-                      ? copy.settings.currentPlan
-                      : (language === "fr" ? "S’abonner" : "Subscribe")}
+                    {isCreator
+                      ? copy.settings.creatorIncluded
+                      : isCurrent
+                        ? copy.settings.currentPlan
+                        : isPlanSimulated
+                          ? copy.settings.planSimulationOnly
+                          : (language === "fr" ? "S’abonner" : "Subscribe")}
                   </button>
                 </article>
               );
             })}
           </div>
-          <p className="plan-selection-note" role="status">{copy.settings.planSelectionNote}</p>
-          <p className="plan-disclaimer">{copy.settings.allPlansNote}</p>
+          {isCreator ? null : isPlanSimulated ? (
+            <p className="plan-selection-note" role="status">
+              {copy.settings.planSimulationNotice(copy.access.planNames[plan])}
+            </p>
+          ) : (
+            <>
+              <p className="plan-selection-note" role="status">{copy.settings.planSelectionNote}</p>
+              <p className="plan-disclaimer">{copy.settings.allPlansNote}</p>
+            </>
+          )}
         </aside>
       </div>
     </>
+  );
+}
+
+function EmailIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="m4 7 8 6 8-6" />
+    </svg>
   );
 }
 

@@ -163,7 +163,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
         </p>
 
         <p style={styles.legal}>
-          En utilisant Flux, vous acceptez nos conditions d'utilisation.
+          En utilisant Flux, vous acceptez nos conditions d&apos;utilisation.
         </p>
       </section>
     </main>

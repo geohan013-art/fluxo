@@ -30,12 +30,12 @@ export type PlanCopyKey =
   | "standardFeatureCockpit"
   | "standardFeatureSales"
   | "standardFeatureRecover"
+  | "standardFeatureAiReminders"
   | "standardFeatureClients"
   | "proFeatureBase"
   | "proFeatureProjects"
   | "proFeatureRecurring"
   | "businessFeatureIncludesPro"
-  | "businessFeatureRecover"
   | "businessFeatureControl"
   | "proMaxFeatureIncludesBusiness"
   | "proMaxFeatureCockpit"
@@ -72,11 +72,12 @@ export const planFeatures: Record<PlanId, PlanDefinition> = {
       projects: 0,
       users: 1,
     },
-    features: noFeatures,
+    features: { ...noFeatures, aiEmailReminders: true },
     displayFeatures: [
       "standardFeatureCockpit",
       "standardFeatureSales",
       "standardFeatureRecover",
+      "standardFeatureAiReminders",
       "standardFeatureClients",
     ],
   },
@@ -90,7 +91,7 @@ export const planFeatures: Record<PlanId, PlanDefinition> = {
       projects: 100,
       users: 2,
     },
-    features: { ...noFeatures, multiUser: true },
+    features: { ...noFeatures, aiEmailReminders: true, multiUser: true },
     displayFeatures: [
       "proFeatureBase",
       "proFeatureProjects",
@@ -115,7 +116,6 @@ export const planFeatures: Record<PlanId, PlanDefinition> = {
     },
     displayFeatures: [
       "businessFeatureIncludesPro",
-      "businessFeatureRecover",
       "businessFeatureControl",
     ],
   },

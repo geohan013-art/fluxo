@@ -31,13 +31,18 @@ export type Customer = {
   inactiveMonths: number;
 };
 
-export type InvoiceStatus = "never" | "relanced" | "ai-ready";
+export type InvoiceStatus =
+  | "never"
+  | "relanced"
+  | "relanced-with-response"
+  | "ai-ready";
 
 export type Invoice = {
   id: string;
   number: string;
   company: string;
   contact: string;
+  email?: string;
   customerId?: string;
   quoteId?: string;
   amount: number;

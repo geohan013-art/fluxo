@@ -39,12 +39,13 @@ function isFluxoData(value: unknown): value is FluxoData {
         typeof item.number === "string" &&
         typeof item.company === "string" &&
         typeof item.contact === "string" &&
+        (item.email === undefined || typeof item.email === "string") &&
         (item.customerId === undefined || typeof item.customerId === "string") &&
         (item.quoteId === undefined || typeof item.quoteId === "string") &&
         typeof item.amount === "number" &&
         typeof item.dueDate === "string" &&
         typeof item.daysLate === "number" &&
-        ["never", "relanced", "ai-ready"].includes(String(item.status)) &&
+        ["never", "relanced", "relanced-with-response", "ai-ready"].includes(String(item.status)) &&
         (item.paymentStatus === undefined || ["pending", "paid"].includes(String(item.paymentStatus))) &&
         (item.createdAt === undefined || typeof item.createdAt === "string")))) &&
     Array.isArray(data.customers) &&
