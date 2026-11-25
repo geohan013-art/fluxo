@@ -18,6 +18,7 @@ export type SubscriptionAccess = {
   active: boolean;
   isCreator: boolean;
   isSimulated: boolean;
+  isAuthorized: boolean;
   plan: PlanId | null;
   status: string;
 };
@@ -61,13 +62,40 @@ export function isPlanSimulationEnabled() {
   return Boolean(process.env.SIMULATE_PLAN?.trim());
 }
 
+async function isUserAuthorized(
+  admin: ReturnType<typeof createSupabaseAdmin>,
+  userId: string,
+  userEmail: string | undefined,
+): Promise<boolean> {
+  if (!userEmail) return false;
+
+  try {
+    const { data, error } = await admin
+      .from("authorized_users")
+      .select("id")
+      .eq("email", userEmail.toLowerCase())
+      .maybeSingle();
+
+    if (error) {
+      console.error("[subscription] Failed to read authorized_users.", {
+        code: error.code,
+        message: error.message,
+      });
+      return false;
+    }
+
+    return Boolean(data);
+  } catch {
+    return false;
+  }
+}
+
 export function isCreatorUser(user: AuthenticatedUserIdentity) {
   const creatorEmail = process.env.CREATOR_EMAIL?.trim().toLowerCase();
   const accountEmail = user.email?.trim().toLowerCase();
   return Boolean(
     creatorEmail &&
       accountEmail &&
-      user.email_confirmed_at &&
       accountEmail === creatorEmail,
   );
 }
@@ -75,24 +103,28 @@ export function isCreatorUser(user: AuthenticatedUserIdentity) {
 export async function resolveSubscriptionAccess(
   user: AuthenticatedUserIdentity,
 ): Promise<SubscriptionAccess> {
+  // 1. Créateur : accès illimité gratuit (priorité absolue, avant toute simulation)
+  if (isCreatorUser(user)) {
+    return {
+      active: true,
+      isCreator: true,
+      isSimulated: false,
+      isAuthorized: true,
+      plan: "pro_max",
+      status: "creator",
+    };
+  }
+
+  // 2. Simulation locale (uniquement pour les non-créateurs, en dev)
   const simulatedPlan = getSimulatedPlan();
   if (simulatedPlan) {
     return {
       active: true,
       isCreator: false,
       isSimulated: true,
+      isAuthorized: true,
       plan: simulatedPlan,
       status: "simulated",
-    };
-  }
-
-  if (isCreatorUser(user)) {
-    return {
-      active: true,
-      isCreator: true,
-      isSimulated: false,
-      plan: "pro_max",
-      status: "creator",
     };
   }
 
@@ -103,40 +135,79 @@ export async function resolveSubscriptionAccess(
       supabaseUrlConfigured: Boolean(url),
       serviceRoleKeyConfigured: Boolean(key),
     });
-    throw new SubscriptionAccessError(
-      "Service d’abonnement non configuré.",
-      503,
-    );
+    // Mode dégradé : plan standard gratuit, pas de crash
+    return {
+      active: false,
+      isCreator: false,
+      isSimulated: false,
+      isAuthorized: false,
+      plan: null,
+      status: "unconfigured",
+    };
   }
 
   const admin = createSupabaseAdmin(url, key, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
-  const { data, error } = await admin
-    .from("subscriptions")
-    .select("plan,status")
-    .eq("user_id", user.id)
-    .maybeSingle();
 
-  if (error) {
-    console.error("[subscription] Failed to read subscription from Supabase.", {
-      code: error.code,
-      message: error.message,
-    });
-    throw new SubscriptionAccessError(
-      "Impossible de lire l’abonnement.",
-      500,
-    );
+  // 3. Vérification whitelist (autorisés manuellement)
+  const isAuthorized = await isUserAuthorized(admin, user.id, user.email);
+  if (isAuthorized) {
+    return {
+      active: true,
+      isCreator: false,
+      isSimulated: false,
+      isAuthorized: true,
+      plan: "standard",
+      status: "authorized",
+    };
   }
 
-  const active = data?.status === "active" || data?.status === "trialing";
-  return {
-    active,
-    isCreator: false,
-    isSimulated: false,
-    plan: active && isPlanId(data?.plan) ? data.plan : null,
-    status: data?.status ?? "inactive",
-  };
+  // 4. Lecture de l'abonnement Stripe via Supabase (jamais bloquant)
+  try {
+    const { data, error } = await admin
+      .from("subscriptions")
+      .select("plan,status")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (error) {
+      console.error("[subscription] Failed to read subscription from Supabase.", {
+        code: error.code,
+        message: error.message,
+      });
+      // Mode dégradé : pas d'abonnement trouvé, plan gratuit limité
+      return {
+        active: false,
+        isCreator: false,
+        isSimulated: false,
+        isAuthorized: false,
+        plan: null,
+        status: "inactive",
+      };
+    }
+
+    const active = data?.status === "active" || data?.status === "trialing";
+    return {
+      active,
+      isCreator: false,
+      isSimulated: false,
+      isAuthorized: false,
+      plan: active && isPlanId(data?.plan) ? data.plan : null,
+      status: data?.status ?? "inactive",
+    };
+  } catch (error) {
+    console.error("[subscription] Unexpected error reading subscription.", error);
+    // Mode dégradé : jamais de crash
+    return {
+      active: false,
+      isCreator: false,
+      isSimulated: false,
+      isAuthorized: false,
+      plan: null,
+      status: "error",
+    };
+  }
 }
 
 export async function requirePlanFeatureAccess(
@@ -151,6 +222,19 @@ export async function requirePlanFeatureAccess(
     !hasPlanFeature(access.plan, feature)
   ) {
     throw new SubscriptionAccessError(message, 403);
+  }
+  return access;
+}
+
+export async function requireUserAccess(
+  user: AuthenticatedUserIdentity,
+): Promise<SubscriptionAccess> {
+  const access = await resolveSubscriptionAccess(user);
+  if (!access.active && !access.isAuthorized) {
+    throw new SubscriptionAccessError(
+      "Abonnement requis pour accéder à cette fonctionnalité.",
+      403,
+    );
   }
   return access;
 }
