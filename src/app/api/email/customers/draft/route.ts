@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import {
   emailIntegrationErrorResponse,
   EmailIntegrationError,
-  generateOpenAiDraft,
+  generateDraftWithFallback,
   requireAiEmailAccess,
   requireAuthenticatedUser,
 } from "@/lib/email/gmail-server";
@@ -42,13 +42,17 @@ export async function POST(request: Request) {
     await requireAiEmailAccess(user);
     const customer = parseInput(await request.json());
     const languageName = customer.language === "fr" ? "French" : "English";
-    const draft = await generateOpenAiDraft(
+    const draft = await generateDraftWithFallback(
       `Write a concise, warm, professional re-engagement email in ${languageName} to a former client. Return only a JSON object with string fields "subject" and "body". Use the company name, optional contact name, and inactivity period naturally. Address the contact by name when provided; otherwise use a neutral greeting. Do not invent purchases, projects, dates, discounts, or other facts. Keep the message low-pressure and invite a reply.`,
       {
         clientName: customer.name.trim(),
         contactName: customer.contactName.trim() || undefined,
         monthsSinceLastActivity: customer.inactiveMonths,
+        name: customer.name.trim(),
+        inactiveMonths: customer.inactiveMonths,
+        language: customer.language,
       },
+      "customer"
     );
     return NextResponse.json(draft);
   } catch (error) {

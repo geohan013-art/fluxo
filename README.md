@@ -34,6 +34,10 @@ CREATOR_EMAIL=verified-account@example.com
 
 The matching authenticated account receives the Pro Max entitlement, including all four plans' features and quotas, without a Stripe subscription. Other accounts continue to use the normal subscription and Stripe checkout flow. The configured email must be confirmed by Supabase Auth.
 
+## Subscription access configuration
+
+Apply `supabase/migrations/20261122000100_create_subscriptions.sql` and `supabase/migrations/20261122000200_expand_subscription_plan_tiers.sql` to the Supabase project used by the app. The subscriptions table has row-level security enabled without client policies; server-side subscription access requires `SUPABASE_SERVICE_ROLE_KEY` and `NEXT_PUBLIC_SUPABASE_URL` to belong to that same project. Set the service-role key only as a server-side Vercel environment variable, never with a `NEXT_PUBLIC_` prefix, and redeploy after changing it.
+
 ## Optional Gmail connection
 
 The optional Gmail connection remains available in Settings. AI follow-ups for quotes, invoices, and customers are sent through Resend instead. Gmail OAuth requires the Gmail API to be enabled in Google Cloud and the following server-side environment variables:

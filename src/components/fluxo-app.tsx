@@ -195,6 +195,10 @@ function getCustomerContactName(customer: Customer) {
   return contactParts.find((part) => part && !part.includes("@")) ?? "";
 }
 
+function combineAiNotes(...notes: Array<string | undefined>) {
+  return notes.map((note) => note?.trim()).filter(Boolean).join("\n");
+}
+
 function copyTextFallback(text: string) {
   const textarea = document.createElement("textarea");
   textarea.value = text;
@@ -450,11 +454,15 @@ export default function FluxoApp() {
     setDialog({ kind: "recurring", item });
   }
 
-  function getInvoiceEmail(invoice: Invoice) {
-    const customer = data.customers.find((item) =>
+  function getInvoiceCustomer(invoice: Invoice) {
+    return data.customers.find((item) =>
       (invoice.customerId && item.id === invoice.customerId) ||
       item.name.trim().toLocaleLowerCase() === invoice.company.trim().toLocaleLowerCase(),
     );
+  }
+
+  function getInvoiceEmail(invoice: Invoice) {
+    const customer = getInvoiceCustomer(invoice);
     const quote = data.quotes.find((item) => item.id === invoice.quoteId);
     return invoice.email?.trim() || (customer ? getCustomerEmail(customer) : undefined) ||
       quote?.email?.trim() || "";
@@ -487,6 +495,7 @@ export default function FluxoApp() {
           dueDate: invoice.dueDate,
           daysLate: getInvoiceDaysLate(invoice),
           language: settings.language,
+          note: combineAiNotes(invoice.note, getInvoiceCustomer(invoice)?.note),
         }),
       });
       const result: unknown = await response.json();
@@ -618,6 +627,7 @@ export default function FluxoApp() {
       email: customer
         ? getCustomerEmail(customer) ?? (String(form.get("email")).trim() || undefined)
         : String(form.get("email")).trim() || undefined,
+      note: String(form.get("note") ?? "").trim() || undefined,
       customerId: customer?.id,
       amount: Number(form.get("amount")),
       probability: Number(form.get("probability")),
@@ -666,6 +676,7 @@ export default function FluxoApp() {
       contact: String(form.get("contact")).trim(),
       contactName: String(form.get("contactName")).trim() || undefined,
       email: String(form.get("email")).trim() || undefined,
+      note: String(form.get("note") ?? "").trim() || undefined,
       lastAmount: Number(form.get("lastAmount")),
       inactiveMonths: Number(form.get("inactiveMonths")),
     };
@@ -706,6 +717,7 @@ export default function FluxoApp() {
       company: customer?.name ?? company,
       contact: customer ? getCustomerContactName(customer) : String(form.get("contact")).trim(),
       email: String(form.get("email") ?? "").trim() || (customer ? getCustomerEmail(customer) : undefined),
+      note: String(form.get("note") ?? "").trim() || undefined,
       customerId: customer?.id,
       amount: Number(form.get("amount")),
       dueDate,
@@ -907,6 +919,7 @@ export default function FluxoApp() {
           status: quote.status,
           createdAt: quote.createdAt,
           language: settings.language,
+          note: combineAiNotes(quote.note, customer?.note),
         }),
       });
       const result: unknown = await response.json();
@@ -1047,6 +1060,7 @@ export default function FluxoApp() {
           contactName: getCustomerContactName(customer),
           inactiveMonths: customer.inactiveMonths,
           language: settings.language,
+          note: customer.note,
         }),
       });
       const result: unknown = await response.json();

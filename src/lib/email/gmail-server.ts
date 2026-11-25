@@ -68,6 +68,99 @@ export function getOpenAiApiKey() {
   return requiredEnv("OPENAI_API_KEY");
 }
 
+type DraftContextType = "invoice" | "customer" | "quote";
+
+function formatCurrencyFallback(value: unknown, language: "fr" | "en"): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return value.toLocaleString(language === "fr" ? "fr-FR" : "en-GB", {
+    style: "currency",
+    currency: "EUR",
+  });
+}
+
+function generateFallbackDraft(context: unknown, type: DraftContextType): { subject: string; body: string } {
+  const ctx = context as Record<string, unknown>;
+  const language = (ctx.language === "fr" ? "fr" : "en") as "fr" | "en";
+
+  if (type === "invoice") {
+    const invoiceNumber = String(ctx.invoiceNumber ?? "—");
+    const company = String(ctx.company ?? "—");
+    const amount = formatCurrencyFallback(ctx.amount, language);
+    const dueDate = String(ctx.dueDate ?? "—");
+    const daysLate = typeof ctx.daysLate === "number" ? ctx.daysLate : 0;
+
+    if (language === "fr") {
+      return {
+        subject: `Rappel : facture ${invoiceNumber} — ${company}`,
+        body: `Bonjour,\n\nIl s'agit d'un rappel concernant la facture n°${invoiceNumber} pour ${company} (montant : ${amount}, échéance : ${dueDate}).\n\n${daysLate > 0 ? `Cette facture a ${daysLate} jour(s) de retard.` : "L'échéance approche ou est passée."}\n\nNous vous remercions de régulariser votre situation dans les meilleurs délais.\n\nCordialement,`,
+      };
+    }
+    return {
+      subject: `Reminder: Invoice ${invoiceNumber} — ${company}`,
+      body: `Hello,\n\nThis is a reminder regarding invoice #${invoiceNumber} for ${company} (amount: ${amount}, due date: ${dueDate}).\n\n${daysLate > 0 ? `This invoice is ${daysLate} day(s) overdue.` : "The due date is approaching or has passed."}\n\nPlease settle your account at your earliest convenience.\n\nBest regards,`,
+    };
+  }
+
+  if (type === "customer") {
+    const clientName = String(ctx.clientName ?? ctx.name ?? "—");
+    const contactName = String(ctx.contactName ?? "");
+    const months = typeof ctx.inactiveMonths === "number" ? ctx.inactiveMonths : 0;
+    const greeting = contactName ? contactName : language === "fr" ? "Bonjour" : "Hello";
+
+    if (language === "fr") {
+      return {
+        subject: `Reprenons contact — ${clientName}`,
+        body: `Bonjour ${greeting},\n\nCela fait ${months} mois que nous n'avons pas eu l'occasion d'échanger avec ${clientName}. Nous serions ravis de reprendre contact et de discuter de vos projets à venir.\n\nN'hésitez pas à nous répondre pour convenir d'un appel.\n\nCordialement,`,
+      };
+    }
+    return {
+      subject: `Let's reconnect — ${clientName}`,
+      body: `Hello ${greeting},\n\nIt's been ${months} months since we last connected with ${clientName}. We'd love to reconnect and discuss your upcoming projects.\n\nFeel free to reply to schedule a call.\n\nBest regards,`,
+    };
+  }
+
+  if (type === "quote") {
+    const client = String(ctx.client ?? "—");
+    const contactName = String(ctx.contactName ?? "");
+    const amount = formatCurrencyFallback(ctx.amount, language);
+    const probability = typeof ctx.probability === "number" ? ctx.probability : 0;
+    const status = String(ctx.status ?? "pending");
+    const greeting = contactName ? contactName : language === "fr" ? "Bonjour" : "Hello";
+
+    if (language === "fr") {
+      return {
+        subject: `Devis — ${client}`,
+        body: `Bonjour ${greeting},\n\nJe reviens vers vous concernant le devis pour ${client} (montant : ${amount}, probabilité estimée : ${probability}%, statut : ${status}).\n\nSeriez-vous disponible pour en discuter ou pour valider cette proposition ?\n\nCordialement,`,
+      };
+    }
+    return {
+      subject: `Quote — ${client}`,
+      body: `Hello ${greeting},\n\nI'm following up regarding the quote for ${client} (amount: ${amount}, estimated probability: ${probability}%, status: ${status}).\n\nWould you be available to discuss or approve this proposal?\n\nBest regards,`,
+    };
+  }
+
+  return {
+    subject: language === "fr" ? "Message" : "Message",
+    body: language === "fr" ? "Bonjour,\n\nCe message est un brouillon généré automatiquement.\n\nCordialement," : "Hello,\n\nThis is an automatically generated draft.\n\nBest regards,",
+  };
+}
+
+export async function generateDraftWithFallback(
+  systemPrompt: string,
+  context: unknown,
+  type: DraftContextType
+): Promise<{ subject: string; body: string }> {
+  try {
+    return await generateOpenAiDraft(systemPrompt, context);
+  } catch (error) {
+    console.error(
+      "[openai] Draft generation failed, using fallback template.",
+      error instanceof Error ? error.message : String(error)
+    );
+    return generateFallbackDraft(context, type);
+  }
+}
+
 export async function generateOpenAiDraft(systemPrompt: string, context: unknown) {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -86,6 +179,41 @@ export async function generateOpenAiDraft(systemPrompt: string, context: unknown
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) {
+    const requestId = response.headers.get("x-request-id");
+    let errorCode: string | null = null;
+    let errorType: string | null = null;
+    try {
+      const payload: unknown = await response.json();
+      if (
+        payload &&
+        typeof payload === "object" &&
+        "error" in payload &&
+        payload.error &&
+        typeof payload.error === "object"
+      ) {
+        const upstreamError = payload.error;
+        errorCode =
+          "code" in upstreamError && typeof upstreamError.code === "string"
+            ? upstreamError.code
+            : null;
+        errorType =
+          "type" in upstreamError && typeof upstreamError.type === "string"
+            ? upstreamError.type
+            : null;
+      }
+    } catch (error) {
+      console.error("[openai] Could not parse error response.", {
+        status: response.status,
+        requestId,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
+    console.error("[openai] Draft generation request failed.", {
+      status: response.status,
+      requestId,
+      errorCode,
+      errorType,
+    });
     throw new EmailIntegrationError("OpenAI n’a pas pu générer le brouillon. Réessayez.", 502);
   }
   const result: unknown = await response.json();

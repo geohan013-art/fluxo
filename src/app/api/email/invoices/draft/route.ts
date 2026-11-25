@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import {
   emailIntegrationErrorResponse,
   EmailIntegrationError,
-  generateOpenAiDraft,
+  generateDraftWithFallback,
   requireAiEmailAccess,
   requireAuthenticatedUser,
 } from "@/lib/email/gmail-server";
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
 
     const language = invoice.language === "fr" ? "French" : "English";
 
-    const draft = await generateOpenAiDraft(
+    const draft = await generateDraftWithFallback(
       `Write a concise, polite invoice payment reminder in ${language}. Return only a JSON object with string fields "subject" and "body". Mention the invoice number, company, amount, due date and days late. Do not invent payment details or links. If the invoice is not overdue, use a gentle reminder.`,
       {
         invoiceNumber: invoice.invoiceNumber,
@@ -44,7 +44,9 @@ export async function POST(request: Request) {
         amount: invoice.amount,
         dueDate: invoice.dueDate,
         daysLate: invoice.daysLate,
+        language: invoice.language,
       },
+      "invoice"
     );
 
     return NextResponse.json(draft);

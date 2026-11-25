@@ -6,6 +6,7 @@ export type Quote = {
   id: string;
   client: string;
   email?: string;
+  note?: string;
   customerId?: string;
   amount: number;
   probability: number;
@@ -27,6 +28,7 @@ export type Customer = {
   contact: string;
   contactName?: string;
   email?: string;
+  note?: string;
   lastAmount: number;
   inactiveMonths: number;
 };
@@ -43,6 +45,7 @@ export type Invoice = {
   company: string;
   contact: string;
   email?: string;
+  note?: string;
   customerId?: string;
   quoteId?: string;
   amount: number;

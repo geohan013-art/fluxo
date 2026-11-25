@@ -38,6 +38,16 @@ export async function sendResendMessage(message: {
   });
 
   if (!response.ok) {
-    throw new EmailIntegrationError("Resend n’a pas pu envoyer le message.", 502);
+    let detail = "";
+    try {
+      const body = await response.text();
+      detail = body ? ` — ${body}` : "";
+    } catch {
+      // Ignore les erreurs de lecture du corps de réponse
+    }
+    throw new EmailIntegrationError(
+      `Resend n’a pas pu envoyer le message.${detail}`,
+      502
+    );
   }
 }

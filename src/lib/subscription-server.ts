@@ -99,6 +99,10 @@ export async function resolveSubscriptionAccess(
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) {
+    console.error("[subscription] Supabase admin configuration is incomplete.", {
+      supabaseUrlConfigured: Boolean(url),
+      serviceRoleKeyConfigured: Boolean(key),
+    });
     throw new SubscriptionAccessError(
       "Service d’abonnement non configuré.",
       503,
@@ -115,6 +119,10 @@ export async function resolveSubscriptionAccess(
     .maybeSingle();
 
   if (error) {
+    console.error("[subscription] Failed to read subscription from Supabase.", {
+      code: error.code,
+      message: error.message,
+    });
     throw new SubscriptionAccessError(
       "Impossible de lire l’abonnement.",
       500,

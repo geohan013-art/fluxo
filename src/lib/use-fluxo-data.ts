@@ -18,6 +18,7 @@ function isFluxoData(value: unknown): value is FluxoData {
       typeof item.id === "string" &&
       typeof item.client === "string" &&
       (item.email === undefined || typeof item.email === "string") &&
+      (item.note === undefined || typeof item.note === "string") &&
       (item.customerId === undefined || typeof item.customerId === "string") &&
       typeof item.amount === "number" &&
       Number.isFinite(item.amount) &&
@@ -40,6 +41,7 @@ function isFluxoData(value: unknown): value is FluxoData {
         typeof item.company === "string" &&
         typeof item.contact === "string" &&
         (item.email === undefined || typeof item.email === "string") &&
+        (item.note === undefined || typeof item.note === "string") &&
         (item.customerId === undefined || typeof item.customerId === "string") &&
         (item.quoteId === undefined || typeof item.quoteId === "string") &&
         typeof item.amount === "number" &&
@@ -55,6 +57,7 @@ function isFluxoData(value: unknown): value is FluxoData {
       typeof item.contact === "string" &&
       (item.contactName === undefined || typeof item.contactName === "string") &&
       (item.email === undefined || typeof item.email === "string") &&
+      (item.note === undefined || typeof item.note === "string") &&
       typeof item.lastAmount === "number" &&
       Number.isFinite(item.lastAmount) &&
       typeof item.inactiveMonths === "number" &&

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import {
   emailIntegrationErrorResponse,
   EmailIntegrationError,
-  generateOpenAiDraft,
+  generateDraftWithFallback,
   requireAiEmailAccess,
   requireAuthenticatedUser,
 } from "@/lib/email/gmail-server";
@@ -51,16 +51,18 @@ export async function POST(request: Request) {
     await requireAiEmailAccess(user);
     const quote = parseInput(await request.json());
     const languageName = quote.language === "fr" ? "French" : "English";
-    const draft = await generateOpenAiDraft(
+    const draft = await generateDraftWithFallback(
       `Write a concise, polite follow-up email about a business quote in ${languageName}. Return only a JSON object with string fields "subject" and "body". Personalize it using the provided client and contact names and quote details. Adapt the wording to the current quote status and likelihood. Do not invent dates, commitments, discounts, or facts. Keep the tone professional and non-pressuring.`,
       {
         client: quote.client.trim(),
         contactName: quote.contactName.trim() || undefined,
-        amountEUR: quote.amount,
-        probabilityPercent: quote.probability,
+        amount: quote.amount,
+        probability: quote.probability,
         status: quote.status,
-        quoteCreatedAt: quote.createdAt,
+        createdAt: quote.createdAt,
+        language: quote.language,
       },
+      "quote"
     );
     return NextResponse.json(draft);
   } catch (error) {
