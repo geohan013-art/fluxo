@@ -96,6 +96,7 @@ export function isCreatorUser(user: AuthenticatedUserIdentity) {
   return Boolean(
     creatorEmail &&
       accountEmail &&
+      user.email_confirmed_at &&
       accountEmail === creatorEmail,
   );
 }
@@ -103,19 +104,7 @@ export function isCreatorUser(user: AuthenticatedUserIdentity) {
 export async function resolveSubscriptionAccess(
   user: AuthenticatedUserIdentity,
 ): Promise<SubscriptionAccess> {
-  // 1. Créateur : accès illimité gratuit (priorité absolue, avant toute simulation)
-  if (isCreatorUser(user)) {
-    return {
-      active: true,
-      isCreator: true,
-      isSimulated: false,
-      isAuthorized: true,
-      plan: "pro_max",
-      status: "creator",
-    };
-  }
-
-  // 2. Simulation locale (uniquement pour les non-créateurs, en dev)
+  // 1. Simulation locale (priorité absolue en dev)
   const simulatedPlan = getSimulatedPlan();
   if (simulatedPlan) {
     return {
@@ -125,6 +114,18 @@ export async function resolveSubscriptionAccess(
       isAuthorized: true,
       plan: simulatedPlan,
       status: "simulated",
+    };
+  }
+
+  // 2. Créateur : accès illimité gratuit
+  if (isCreatorUser(user)) {
+    return {
+      active: true,
+      isCreator: true,
+      isSimulated: false,
+      isAuthorized: true,
+      plan: "pro_max",
+      status: "creator",
     };
   }
 

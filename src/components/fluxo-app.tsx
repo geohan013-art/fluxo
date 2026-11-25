@@ -276,17 +276,14 @@ export default function FluxoApp() {
           throw new Error("Réponse d’abonnement invalide.");
         }
         const subscription = result as Record<string, unknown>;
-        const isCreatorFromApi = subscription.isCreator === true;
-        const isSimulatedFromApi = subscription.isSimulated === true;
         const active = subscription.active === true && isPlanId(subscription.plan);
         const plan: PlanId = isPlanId(subscription.plan)
           ? subscription.plan
           : "standard";
         const effectivePlan: PlanId = active ? plan : "standard";
-        // Le créateur est détecté indépendamment de la simulation :
-        // isCreatorFromApi est la source de vérité (mis à jour par resolveSubscriptionAccess)
-        const isPlanSimulated = active && isSimulatedFromApi && !isCreatorFromApi;
-        const isCreator = active && isCreatorFromApi && effectivePlan === "pro_max";
+        const isPlanSimulated = active && subscription.isSimulated === true;
+        const isCreator = active && !isPlanSimulated &&
+          subscription.isCreator === true && effectivePlan === "pro_max";
         setHasActiveSubscription(active);
         setIsCreatorAccount(isCreator);
         setIsPlanSimulated(isPlanSimulated);
